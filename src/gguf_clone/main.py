@@ -20,7 +20,7 @@ from .common import (
 )
 from .convert import convert_target
 from .files import copy_template_files
-from .metadata import copy_template_metadata
+from .metadata import apply_metadata, copy_template_metadata
 from .params import build_params_payload, copy_imatrix, load_params, save_params_payload
 from .quantize import quantize_gguf
 from .resolve import (
@@ -47,6 +47,7 @@ class RunConfig:
     output_converted_dir: str
     output_params_dir: str
     output_quantized_dir: str
+    output_apply_metadata: dict[str, str]
 
 
 def _ensure_list(v: str | list[str]) -> list[str]:
@@ -74,6 +75,9 @@ class OutputConfig(BaseModel):
     converted_dir: str = "converted"
     params_dir: str = "params"
     quantized_dir: str = "quantized"
+    apply_metadata: dict[str, str] = {
+        "general.quantized_by": "https://github.com/spicyneuron/gguf-clone"
+    }
 
 
 class ConfigFile(BaseModel):
@@ -102,6 +106,7 @@ def load_config(path: Path) -> RunConfig | None:
         output_converted_dir=config.output.converted_dir,
         output_params_dir=config.output.params_dir,
         output_quantized_dir=config.output.quantized_dir,
+        output_apply_metadata=config.output.apply_metadata,
     )
 
 
@@ -340,6 +345,18 @@ def run(
                 template_group[0],
                 output_path,
                 config.template_copy_metadata,
+                indent=stage_indent,
+            )
+            if result != 0:
+                return result
+
+        if config.output_apply_metadata:
+            stage_indent = log_stage(
+                f"Applying metadata to quantized GGUF: {output_path.name}"
+            )
+            result = apply_metadata(
+                output_path,
+                config.output_apply_metadata,
                 indent=stage_indent,
             )
             if result != 0:

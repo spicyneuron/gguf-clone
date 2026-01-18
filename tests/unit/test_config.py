@@ -22,6 +22,10 @@ def test_load_config_valid(tmp_path: Path) -> None:
             "converted_dir": "custom_converted",
             "params_dir": "custom_params",
             "quantized_dir": "custom_quantized",
+            "apply_metadata": {
+                "general.quantized_by": "test-user",
+                "general.custom_field": "custom-value",
+            },
         },
     }
 
@@ -43,6 +47,10 @@ def test_load_config_valid(tmp_path: Path) -> None:
     assert config.output_converted_dir == "custom_converted"
     assert config.output_params_dir == "custom_params"
     assert config.output_quantized_dir == "custom_quantized"
+    assert config.output_apply_metadata == {
+        "general.quantized_by": "test-user",
+        "general.custom_field": "custom-value",
+    }
 
 
 def test_load_config_defaults(tmp_path: Path) -> None:
@@ -63,6 +71,9 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.output_converted_dir == "converted"
     assert config.output_params_dir == "params"
     assert config.output_quantized_dir == "quantized"
+    assert config.output_apply_metadata == {
+        "general.quantized_by": "https://github.com/spicyneuron/gguf-clone"
+    }
     assert config.template_gguf_patterns == ["*gguf"]
     assert config.template_copy_metadata == []
     assert config.template_copy_files == []
@@ -128,3 +139,47 @@ def test_load_config_partial_directory_overrides(tmp_path: Path) -> None:
     assert config.output_converted_dir == "converted"  # Default
     assert config.output_params_dir == "params"  # Default
     assert config.output_quantized_dir == "my_outputs"  # Override
+
+
+def test_load_config_override_apply_metadata(tmp_path: Path) -> None:
+    # Test that users can override the default apply_metadata
+    config_data = {
+        "template": {"repo": "repo", "imatrix": "imatrix", "ggufs": "*gguf"},
+        "target": {"repo": "target"},
+        "output": {
+            "apply_metadata": {
+                "general.quantized_by": "custom-user",
+                "general.custom_field": "custom-value",
+            },
+        },
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.output_apply_metadata == {
+        "general.quantized_by": "custom-user",
+        "general.custom_field": "custom-value",
+    }
+
+
+def test_load_config_clear_apply_metadata(tmp_path: Path) -> None:
+    # Test that users can clear apply_metadata by setting it to empty dict
+    config_data = {
+        "template": {"repo": "repo", "imatrix": "imatrix", "ggufs": "*gguf"},
+        "target": {"repo": "target"},
+        "output": {
+            "apply_metadata": {},
+        },
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.output_apply_metadata == {}

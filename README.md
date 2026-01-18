@@ -95,6 +95,10 @@ target:
 output:
   # Output model is named PREFIX-ORG-MODEL
   prefix: not-unsloth
+  
+  # Add or edit GGUF metadata
+  apply_metadata:
+    general.quantized_by: "https://github.com/spicyneuron/gguf-clone"
 
   # Split output if greater than this size (unit can be M or G)
   split: 50G
