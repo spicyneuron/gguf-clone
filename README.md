@@ -130,4 +130,4 @@ Hugging Face [environment variables](https://huggingface.co/docs/huggingface_hub
 
 All credit goes to the [Unsloth](https://unsloth.ai/) and [llama.cpp](https://github.com/ggml-org/llama.cpp) teams for their hard work and responsiveness. This is merely a wrapper around their genius.
 
-This project was originally inspired by [quant_clone](https://github.com/electroglyph/quant_clone). It didn't actually work, unfortunately, but pointed me in the right direction.
+This project was originally inspired by [quant_clone](https://github.com/electroglyph/quant_clone). It didn't fully work as expected, but pointed me in the right direction.
