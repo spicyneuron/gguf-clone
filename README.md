@@ -22,7 +22,7 @@ In theory, fine-tunes should benefit from the same imatrix data and optimization
 ## Prerequisites
 
 - Python 3.9+ (developed on 3.12, not thoroughly tested on others)
-- The following [llama.cpp](https://github.com/ggerganov/llama.cpp) tools in `PATH` or built under `GGUF_CLONE_LLAMA_CPP_DIR` (see below):
+- The following [llama.cpp](https://github.com/ggerganov/llama.cpp) tools in `PATH` or built under `GGUF_CLONE_LLAMA_CPP` (see below):
   - `llama-quantize`
   - `llama-gguf-split`
 
@@ -114,10 +114,10 @@ output:
 If you don't have llama.cpp tools on your `PATH`, point gguf-clone at a local llama.cpp repo:
 
 ```bash
-GGUF_CLONE_LLAMA_CPP_DIR="path/to/llama.cpp/repo"
+GGUF_CLONE_LLAMA_CPP="path/to/llama.cpp/repo"
 ```
 
-If `GGUF_CLONE_LLAMA_CPP_DIR` is set, gguf-clone will prefer that its scripts and tools over the `PATH` and vendored copies.
+If `GGUF_CLONE_LLAMA_CPP` is set, gguf-clone will prefer that its scripts and tools over the `PATH` and vendored copies.
 
 Hugging Face [environment variables](https://huggingface.co/docs/huggingface_hub/main/en/package_reference/environment_variables) can be used to change your download cache location.
 

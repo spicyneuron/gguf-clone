@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-LLAMA_CPP_DIR_ENV = "GGUF_CLONE_LLAMA_CPP_DIR"
+LLAMA_CPP_DIR_ENV = "GGUF_CLONE_LLAMA_CPP"
 
 
 def configure_gguf_path() -> None:

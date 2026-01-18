@@ -29,7 +29,7 @@ DEPENDENCIES = [
 ]
 
 
-LLAMA_CPP_DIR_ENV = "GGUF_CLONE_LLAMA_CPP_DIR"
+LLAMA_CPP_DIR_ENV = "GGUF_CLONE_LLAMA_CPP"
 
 
 class ToolResolutionError(RuntimeError):
@@ -109,7 +109,7 @@ def resolve_llama_quantize() -> Path:
         return path
 
     raise ToolResolutionError(
-        "llama-quantize not found. Set GGUF_CLONE_LLAMA_CPP_DIR or add it to PATH."
+        "llama-quantize not found. Set GGUF_CLONE_LLAMA_CPP or add it to PATH."
     )
 
 
@@ -123,7 +123,7 @@ def resolve_llama_gguf_split() -> Path:
         return path
 
     raise ToolResolutionError(
-        "llama-gguf-split not found. Set GGUF_CLONE_LLAMA_CPP_DIR or add it to PATH."
+        "llama-gguf-split not found. Set GGUF_CLONE_LLAMA_CPP or add it to PATH."
     )
 
 
@@ -137,7 +137,7 @@ def resolve_convert_hf_to_gguf() -> Path:
         return path
 
     raise ToolResolutionError(
-        "convert_hf_to_gguf.py not found. Set GGUF_CLONE_LLAMA_CPP_DIR "
+        "convert_hf_to_gguf.py not found. Set GGUF_CLONE_LLAMA_CPP "
         + "or use the vendored copy."
     )
 
@@ -169,7 +169,7 @@ def check_gguf_support() -> str | None:
     if not hasattr(vocab, "MistralTokenizerType"):
         return (
             "gguf package is missing MistralTokenizerType. Use the vendored gguf or set "
-            + "GGUF_CLONE_LLAMA_CPP_DIR to a newer gguf-py."
+            + "GGUF_CLONE_LLAMA_CPP to a newer gguf-py."
         )
 
     return None
@@ -177,7 +177,7 @@ def check_gguf_support() -> str | None:
 
 def print_env_hint() -> None:
     envs = [
-        "GGUF_CLONE_LLAMA_CPP_DIR",
+        "GGUF_CLONE_LLAMA_CPP",
     ]
     print("Environment variables:")
     for env in envs:
