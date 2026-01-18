@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+.python-version
+.pytest_cache
+.ruff_cache
+
+.DS_Store
+
+tests/integration/*converted
+tests/integration/*params
+tests/integration/*quantized
