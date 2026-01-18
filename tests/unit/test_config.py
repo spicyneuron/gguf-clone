@@ -168,7 +168,7 @@ def test_load_config_override_apply_metadata(tmp_path: Path) -> None:
 
 def test_load_config_clear_apply_metadata(tmp_path: Path) -> None:
     # Test that users can clear apply_metadata by setting it to empty dict
-    config_data = {
+    config_data: dict[str, object] = {
         "template": {"repo": "repo", "imatrix": "imatrix", "ggufs": "*gguf"},
         "target": {"repo": "target"},
         "output": {
