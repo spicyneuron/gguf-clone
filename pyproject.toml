@@ -34,6 +34,7 @@ dev = [
 
 [project.scripts]
 gguf_clone = "gguf_clone.cli:main"
+gguf-clone = "gguf_clone.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
