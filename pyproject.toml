@@ -19,7 +19,6 @@ dependencies = [
   "sentencepiece~=0.2.0",
   "transformers>=4.57.1,<5.0.0",
   "protobuf>=4.21.0,<5.0.0",
-  "gguf @ git+https://github.com/ggml-org/llama.cpp.git#subdirectory=gguf-py",
   "huggingface-hub>=0.24.0",
   "pydantic>=2.0.0",
   "pyyaml>=6.0.1",
@@ -41,3 +40,15 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"gguf_clone._vendor.gguf" = ["py.typed"]
+"gguf_clone._vendor" = ["LLAMA_CPP_LICENSE"]
+
+[tool.ruff]
+exclude = ["src/gguf_clone/_vendor"]
+
+[tool.basedpyright]
+include = ["src/gguf_clone", "tests"]
+exclude = ["src/gguf_clone/_vendor"]
+extraPaths = ["src", "src/gguf_clone/_vendor"]

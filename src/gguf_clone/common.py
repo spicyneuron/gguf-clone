@@ -96,15 +96,20 @@ def remove_files(paths: list[Path]) -> bool:
     return True
 
 
-def run_command(cmd: list[str], *, cwd: Path | None = None) -> int:
+def run_command(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
     """Run a command, capturing output unless verbose mode is enabled.
 
     Returns the process return code. Prints captured output on failure.
     """
     if _verbose:
-        result = subprocess.run(cmd, cwd=cwd)
+        result = subprocess.run(cmd, cwd=cwd, env=env)
     else:
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, env=env)
 
     if result.returncode != 0 and not _verbose:
         if result.stdout:

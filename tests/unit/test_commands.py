@@ -59,6 +59,7 @@ def test_convert_target_command(mock_run: MagicMock, tmp_path: Path) -> None:
     assert str(output_dir / "converted.gguf") in cmd
     assert str(model_path) in cmd
     assert kwargs["cwd"] == work_dir
+    assert isinstance(kwargs["env"], dict)
 
 
 @patch("gguf_clone.quantize.run_command")

@@ -16,15 +16,15 @@ In theory, fine-tunes should benefit from the same imatrix data and optimization
 - Use any Hugging Face model as **target** (model to quantize)
 - Optionally copy GGUF metatdata and loose files (mmproj, etc)
 - Run multiple quantizations from the same template
+- Use split GGUFs as template input and/or target output
 - Works with your existing Hugging Face cache and llama.cpp install
 
 ## Prerequisites
 
 - Python 3.9+ (developed on 3.12, not thoroughly tested on others)
-- [llama.cpp](https://github.com/ggerganov/llama.cpp) tools in $PATH or provided by environment variables (see below):
+- The following [llama.cpp](https://github.com/ggerganov/llama.cpp) tools in `PATH` or built under `GGUF_CLONE_LLAMA_CPP_DIR` (see below):
   - `llama-quantize`
   - `llama-gguf-split`
-  - `convert_hf_to_gguf.py`
 
 ## Installation + Usage
 
@@ -47,11 +47,11 @@ gguf-clone --overwrite
 gguf-clone --cancel
 ```
 
-Outputs are generated alongside the config (configurable):
+Outputs are generated alongside the config file by default:
 
-- `converted/*.gguf` - The target model converted into a GGUF for llama.cpp
-- `params/*.json` - `llama-quantize` paramaters extracted from template GGUFs
-- `quantized/*.gguf` and `quantized/<quant_label>/*.gguf` 
+- `converted/*.gguf` - Target model converted into a GGUF for llama.cpp
+- `params/*.json` - `llama-quantize` paramaters extracted from template GGUF(s)
+- `quantized/*.gguf` - Final quantized outputs
 
 ## Configuration
 
@@ -111,24 +111,20 @@ output:
 
 ## Environment Variables
 
-If you don't have tools on your $PATH, you'll need to provide them.
+If you don't have llama.cpp tools on your `PATH`, point gguf-clone at a local llama.cpp repo:
 
 ```bash
-# Option 1: Point to llama.cpp with built binaries
 GGUF_CLONE_LLAMA_CPP_DIR="path/to/llama.cpp/repo"
-
-# Option 2: Point to individual files
-GGUF_CLONE_LLAMA_QUANTIZE="..."
-GGUF_CLONE_LLAMA_GGUF_SPLIT="..."
-GGUF_CLONE_CONVERT_HF_TO_GGUF="..."
 ```
 
-Hugging Face [environment variables](https://huggingface.co/docs/huggingface_hub/main/en/package_reference/environment_variables) can be used to change your cache location.
+If `GGUF_CLONE_LLAMA_CPP_DIR` is set, gguf-clone will prefer that its scripts and tools over the `PATH` and vendored copies.
+
+Hugging Face [environment variables](https://huggingface.co/docs/huggingface_hub/main/en/package_reference/environment_variables) can be used to change your download cache location.
 
 ## Technical Notes
 
 - **Cloning accuracy**: The tool uses heuristics to determine quantization parameters from template GGUFs (most common tensor type as default, ignore lists for non-quantized tensors). For identical tensor names and shapes, results should be functionally equivalent.
-- **Git dependency required**: The PyPI version of `gguf` is significantly behind and incompatible with `convert_hf_to_gguf.py`. The git dependency ensures compatibility with llama.cpp tools.
+- **Vendored dependencies**: `gguf-py/gguf` is vendored from [llama.cpp](https://github.com/ggml-org/llama.cpp) because the published version on PyPI is out of date with recent `llama.cpp` versions. `convert_hf_to_gguf.py` is also vendered so conversion behavior stays aligned.
 
 ## Gratitude
 

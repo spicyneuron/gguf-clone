@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from .common import confirm_overwrite, log_line, log_success, remove_files, run_command
+from .gguf_path import build_gguf_env
 
 
 def convert_target(
@@ -44,7 +45,7 @@ def convert_target(
     ]
 
     log_line(f"Running: {' '.join(cmd)}", indent=indent)
-    returncode = run_command(cmd, cwd=cwd)
+    returncode = run_command(cmd, cwd=cwd, env=build_gguf_env())
     if returncode != 0:
         return returncode
 
