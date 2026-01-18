@@ -125,6 +125,11 @@ GGUF_CLONE_CONVERT_HF_TO_GGUF="..."
 
 Hugging Face [environment variables](https://huggingface.co/docs/huggingface_hub/main/en/package_reference/environment_variables) can be used to change your cache location.
 
+## Technical Notes
+
+- **Cloning accuracy**: The tool uses heuristics to determine quantization parameters from template GGUFs (most common tensor type as default, ignore lists for non-quantized tensors). For identical tensor names and shapes, results should be functionally equivalent.
+- **Git dependency required**: The PyPI version of `gguf` is significantly behind and incompatible with `convert_hf_to_gguf.py`. The git dependency ensures compatibility with llama.cpp tools.
+
 ## Gratitude
 
 All credit goes to the [Unsloth](https://unsloth.ai/) and [llama.cpp](https://github.com/ggml-org/llama.cpp) teams for their hard work and responsiveness. This is merely a wrapper around their genius.
