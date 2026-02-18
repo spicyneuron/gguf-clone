@@ -134,6 +134,23 @@ def test_build_params_multiple_ggufs() -> None:
             assert params.default_type == "Q4_K"
 
 
+def test_build_params_conflict_raises() -> None:
+    """Conflicting qtypes for the same layer across files raises ValueError."""
+    with patch("gguf_clone.params.GGUFReader") as MockReader:
+        reader_one = MagicMock()
+        reader_two = MagicMock()
+        MockReader.side_effect = [reader_one, reader_two]
+        with patch("gguf_clone.params.GGMLQuantizationType") as MockQType:
+            MockQType.side_effect = _qtype_factory({2: "Q4_K", 3: "Q6_K"})
+
+            # Same tensor, different qtypes across files
+            reader_one.tensors = [_make_tensor("blk.0.attn_q.weight", 2)]
+            reader_two.tensors = [_make_tensor("blk.0.attn_q.weight", 3)]
+
+            with pytest.raises(ValueError, match="Conflicting types"):
+                build_params([Path("a.gguf"), Path("b.gguf")])  # pyright: ignore[reportUnusedCallResult]
+
+
 def test_build_params_uniform_wildcard() -> None:
     """All layers sharing a qtype produce a single \\d+ wildcard."""
     with patch("gguf_clone.params.GGUFReader") as MockReader:

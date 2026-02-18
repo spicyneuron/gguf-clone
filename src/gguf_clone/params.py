@@ -79,7 +79,14 @@ def build_params(paths: Path | list[Path]) -> QuantParams:
             quant_type_counts[qtype] = quant_type_counts.get(qtype, 0) + 1
             if match:
                 pre, num, post = match.group(1), match.group(2), match.group(3)
-                layered.setdefault((pre, post), {})[num] = qtype
+                group = layered.setdefault((pre, post), {})
+                existing = group.get(num)
+                if existing is not None and existing != qtype:
+                    name = f"{pre}.{num}.{post}"
+                    raise ValueError(
+                        f"Conflicting types for {name}: {existing} vs {qtype}"
+                    )
+                group[num] = qtype
             else:
                 entry = f"{tensor.name}={qtype}"
                 if entry not in seen_tensor_types:
