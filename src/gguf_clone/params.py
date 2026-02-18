@@ -11,39 +11,6 @@ from gguf import GGMLQuantizationType, GGUFReader, ReaderTensor
 
 from .common import require_mapping
 
-# Adapted from https://github.com/unslothai/llama.cpp/blob/master/src/llama-quant.cpp
-IGNORE = [
-    "_norm.weight",
-    "ffn_gate_inp.weight",
-    "altup",
-    "laurel",
-    "per_layer_model_proj",
-    "position_embd.weight",
-    "pos_embd.weight",
-    "token_type_embd.weight",
-    "token_types.weight",
-    "ssm_conv1d.weight",
-    "shortconv.conv.weight",
-    "time_mix_first.weight",
-    "time_mix_w0.weight",
-    "time_mix_w1.weight",
-    "time_mix_w2.weight",
-    "time_mix_v0.weight",
-    "time_mix_v1.weight",
-    "time_mix_v2.weight",
-    "time_mix_a0.weight",
-    "time_mix_a1.weight",
-    "time_mix_a2.weight",
-    "time_mix_g1.weight",
-    "time_mix_g2.weight",
-    "time_mix_decay_w1.weight",
-    "time_mix_decay_w2.weight",
-    "time_mix_lerp_fused.weight",
-    "attn_rel_b.weight",
-    ".position_embd.",
-]
-
-
 LAYER_NAME = re.compile(r"^(.*?)\.(\d+)\.(.*)$")
 
 
@@ -72,8 +39,6 @@ def ignore_tensor(tensor: ReaderTensor) -> bool:
         return True
     if len(tensor.shape) < 2:
         return True
-    if any(s in tensor.name for s in IGNORE):
-        return True
     return False
 
 
@@ -100,7 +65,8 @@ def copy_imatrix(src: Path, dest_dir: Path, prefix: str = "") -> str:
 def build_params(paths: Path | list[Path]) -> QuantParams:
     tensor_types: list[str] = []
     seen_tensor_types: set[str] = set()
-    seen_tensors: dict[tuple[str, str, str], set[str]] = {}
+    # (prefix, suffix) -> {layer_number: qtype}
+    layered: dict[tuple[str, str], dict[str, str]] = {}
     quant_type_counts: dict[str, int] = {}
 
     for path in _normalize_paths(paths):
@@ -113,16 +79,27 @@ def build_params(paths: Path | list[Path]) -> QuantParams:
             quant_type_counts[qtype] = quant_type_counts.get(qtype, 0) + 1
             if match:
                 pre, num, post = match.group(1), match.group(2), match.group(3)
-                seen_tensors.setdefault((pre, post, qtype), set()).add(num)
+                layered.setdefault((pre, post), {})[num] = qtype
             else:
                 entry = f"{tensor.name}={qtype}"
                 if entry not in seen_tensor_types:
                     tensor_types.append(entry)
                     seen_tensor_types.add(entry)
 
-    for (pre, post, qtype), numbers in seen_tensors.items():
-        group = "|".join(sorted(numbers, key=int))
-        tensor_types.append(f"{pre}\\.({group})\\.{post}={qtype}")
+    for (pre, post), layers in layered.items():
+        qtypes = set(layers.values())
+        if len(qtypes) == 1:
+            # All layers agree -- single wildcard entry
+            qtype = next(iter(qtypes))
+            tensor_types.append(f"{pre}\\.(\\d+)\\.{post}={qtype}")
+        else:
+            # Layers differ -- group by qtype with alternation
+            by_qtype: dict[str, list[str]] = {}
+            for num, qtype in layers.items():
+                by_qtype.setdefault(qtype, []).append(num)
+            for qtype, nums in by_qtype.items():
+                group = "|".join(sorted(nums, key=int))
+                tensor_types.append(f"{pre}\\.({group})\\.{post}={qtype}")
 
     default_type = (
         max(quant_type_counts, key=quant_type_counts.__getitem__)

@@ -23,97 +23,68 @@ def test_quant_label_from_stem(stem: str, expected: str | None) -> None:
     assert quant_label_from_stem(stem) == expected
 
 
+def _make_tensor(name: str, qtype_code: int = 2) -> MagicMock:
+    t = MagicMock()
+    t.name = name
+    t.tensor_type = qtype_code
+    t.shape = [10, 10]
+    return t
+
+
+def _qtype_factory(mapping: dict[int, str]) -> MagicMock:
+    """Return a side_effect callable that maps int codes to named mocks."""
+
+    def factory(code: int) -> MagicMock:
+        m = MagicMock()
+        m.name = mapping.get(code, "UNKNOWN")
+        return m
+
+    return cast(MagicMock, factory)
+
+
+def _matches(tensor_type: str, name: str, qtype: str) -> bool:
+    if not tensor_type.endswith(f"={qtype}"):
+        return False
+    pattern = tensor_type[: -(len(qtype) + 1)]
+    return re.fullmatch(pattern, name) is not None
+
+
 def test_build_params_grouping() -> None:
-    # Mock ReaderTensor
-    def make_tensor(name: str, qtype_code: int = 2) -> MagicMock:
-        # 2 is usually Q4_0 or similar in gguf enum, treating as generic
-        t = MagicMock()
-        t.name = name
-        t.tensor_type = qtype_code
-        t.shape = [10, 10]  # valid shape > 1D
-        return t
-
-    # Mock GGUFReader
+    """Mixed qtypes across layers produce literal per-layer entries."""
     with patch("gguf_clone.params.GGUFReader") as MockReader:
-        mock_reader = cast(MagicMock, MockReader)
-        mock_instance = cast(MagicMock, mock_reader.return_value)
-        # Mock GGMLQuantizationType.name lookup
+        mock_instance = cast(MagicMock, MockReader.return_value)
         with patch("gguf_clone.params.GGMLQuantizationType") as MockQType:
-            mock_qtype = cast(MagicMock, MockQType)
-
-            # Map integer type to string name
-            def make_qtype(name: str) -> MagicMock:
-                m = MagicMock()
-                m.name = name
-                return m
-
-            def qtype_for_code(code: int) -> MagicMock:
-                return make_qtype("Q4_K") if code == 2 else make_qtype("Q6_K")
-
-            mock_qtype.side_effect = qtype_for_code
+            MockQType.side_effect = _qtype_factory({2: "Q4_K", 3: "Q6_K"})
 
             mock_instance.tensors = [
-                make_tensor("blk.0.attn_q.weight", 2),
-                make_tensor("blk.1.attn_q.weight", 2),
-                make_tensor("blk.2.attn_q.weight", 3),  # Different type
-                make_tensor("output.weight", 2),
-                make_tensor(
-                    "token_embd.weight", 2
-                ),  # Should be ignored by ignore_tensor defaults? No, ignore_tensor logic:
-                # ignore_tensor: ends with weight? yes. shape < 2? no. in IGNORE?
-                # IGNORE has "time_mix_...", "attn_rel_b.weight". Not "token_embd.weight".
-                # Wait, let's check IGNORE list in params.py.
+                _make_tensor("blk.0.attn_q.weight", 2),
+                _make_tensor("blk.1.attn_q.weight", 2),
+                _make_tensor("blk.2.attn_q.weight", 3),
+                _make_tensor("output.weight", 2),
+                _make_tensor("token_embd.weight", 2),
             ]
 
-            # Re-read IGNORE list logic in params.py to be sure about token_embd.weight
-            # IGNORE = [..., ".position_embd.", ...]
-            # token_embd is usually not ignored unless explicitly listed.
-
             params = build_params(Path("dummy.gguf"))
-
-            # Check grouping
-            # blk.0.attn_q.weight=Q4_K
-            # blk.1.attn_q.weight=Q4_K
-            # blk.2.attn_q.weight=Q6_K
-            # Expected regex: blk\.(0|1)\.attn_q\.weight=Q4_K
-            # And: blk\.2\.attn_q\.weight=Q6_K
-            # output.weight=Q4_K (no group)
-
-            def matches(tensor_type: str, name: str, qtype: str) -> bool:
-                if not tensor_type.endswith(f"={qtype}"):
-                    return False
-                pattern = tensor_type[: -(len(qtype) + 1)]
-                return re.fullmatch(pattern, name) is not None
-
             types = params.tensor_types
-            assert any(matches(t, "blk.0.attn_q.weight", "Q4_K") for t in types)
-            assert any(matches(t, "blk.1.attn_q.weight", "Q4_K") for t in types)
-            assert any(matches(t, "blk.2.attn_q.weight", "Q6_K") for t in types)
-            assert "output.weight=Q4_K" in types
 
-            # Default type should be Q4_K (majority)
+            # Mixed layers -> grouped regex by qtype
+            assert any(_matches(t, "blk.0.attn_q.weight", "Q4_K") for t in types)
+            assert any(_matches(t, "blk.1.attn_q.weight", "Q4_K") for t in types)
+            assert any(_matches(t, "blk.2.attn_q.weight", "Q6_K") for t in types)
+            assert "output.weight=Q4_K" in types
+            assert "token_embd.weight=Q4_K" in types
             assert params.default_type == "Q4_K"
 
 
 def test_build_params_ignore() -> None:
+    """Structural filters still apply; IGNORE list no longer exists."""
     with patch("gguf_clone.params.GGUFReader") as MockReader:
-        mock_reader = cast(MagicMock, MockReader)
-        mock_instance = cast(MagicMock, mock_reader.return_value)
+        mock_instance = cast(MagicMock, MockReader.return_value)
         with patch("gguf_clone.params.GGMLQuantizationType") as MockQType:
-            mock_qtype = cast(MagicMock, MockQType)
-
-            def make_qtype(name: str) -> MagicMock:
-                m = MagicMock()
-                m.name = name
-                return m
-
-            def qtype_for_code(_code: int) -> MagicMock:
-                return make_qtype("Q4_K")
-
-            mock_qtype.side_effect = qtype_for_code
+            MockQType.side_effect = _qtype_factory({1: "Q4_K"})
 
             t1 = MagicMock()
-            t1.name = "blk.0.ffn_gate_inp.weight"  # In IGNORE list
+            t1.name = "blk.0.ffn_gate_inp.weight"  # No longer ignored
             t1.tensor_type = 1
             t1.shape = [10, 10]
 
@@ -123,7 +94,7 @@ def test_build_params_ignore() -> None:
             t2.shape = [10, 10]
 
             t3 = MagicMock()
-            t3.name = "bias.tensor"  # Not ending in weight
+            t3.name = "bias.tensor"  # Not ending in weight -> ignored
             t3.tensor_type = 1
             t3.shape = [10, 10]
 
@@ -131,51 +102,80 @@ def test_build_params_ignore() -> None:
 
             params = build_params(Path("dummy.gguf"))
 
-            # Only valid.weight should remain
-            assert len(params.tensor_types) == 1
-            assert params.tensor_types[0] == "valid.weight=Q4_K"
+            # ffn_gate_inp.weight is now kept (layered), valid.weight kept
+            assert len(params.tensor_types) == 2
+            assert any(
+                _matches(t, "blk.0.ffn_gate_inp.weight", "Q4_K")
+                for t in params.tensor_types
+            )
+            assert "valid.weight=Q4_K" in params.tensor_types
 
 
 def test_build_params_multiple_ggufs() -> None:
-    def make_tensor(name: str, qtype_code: int = 2) -> MagicMock:
-        t = MagicMock()
-        t.name = name
-        t.tensor_type = qtype_code
-        t.shape = [10, 10]
-        return t
-
+    """Same qtype across files -> single wildcard entry."""
     with patch("gguf_clone.params.GGUFReader") as MockReader:
         reader_one = MagicMock()
         reader_two = MagicMock()
         MockReader.side_effect = [reader_one, reader_two]
         with patch("gguf_clone.params.GGMLQuantizationType") as MockQType:
-            mock_qtype = cast(MagicMock, MockQType)
+            MockQType.side_effect = _qtype_factory({2: "Q4_K"})
 
-            def make_qtype(name: str) -> MagicMock:
-                m = MagicMock()
-                m.name = name
-                return m
-
-            def qtype_for_code(_code: int) -> MagicMock:
-                return make_qtype("Q4_K")
-
-            mock_qtype.side_effect = qtype_for_code
-
-            reader_one.tensors = [make_tensor("blk.0.attn_q.weight", 2)]
-            reader_two.tensors = [make_tensor("blk.1.attn_q.weight", 2)]
+            reader_one.tensors = [_make_tensor("blk.0.attn_q.weight", 2)]
+            reader_two.tensors = [_make_tensor("blk.1.attn_q.weight", 2)]
 
             params = build_params([Path("a.gguf"), Path("b.gguf")])
-
-            def matches(tensor_type: str, name: str, qtype: str) -> bool:
-                if not tensor_type.endswith(f"={qtype}"):
-                    return False
-                pattern = tensor_type[: -(len(qtype) + 1)]
-                return re.fullmatch(pattern, name) is not None
-
             types = params.tensor_types
-            assert any(matches(t, "blk.0.attn_q.weight", "Q4_K") for t in types)
-            assert any(matches(t, "blk.1.attn_q.weight", "Q4_K") for t in types)
+
+            # Both layers same type -> single wildcard
+            assert len(types) == 1
+            assert _matches(types[0], "blk.0.attn_q.weight", "Q4_K")
+            assert _matches(types[0], "blk.1.attn_q.weight", "Q4_K")
+            assert _matches(types[0], "blk.99.attn_q.weight", "Q4_K")
             assert params.default_type == "Q4_K"
+
+
+def test_build_params_uniform_wildcard() -> None:
+    """All layers sharing a qtype produce a single \\d+ wildcard."""
+    with patch("gguf_clone.params.GGUFReader") as MockReader:
+        mock_instance = cast(MagicMock, MockReader.return_value)
+        with patch("gguf_clone.params.GGMLQuantizationType") as MockQType:
+            MockQType.side_effect = _qtype_factory({2: "Q4_K"})
+
+            mock_instance.tensors = [
+                _make_tensor("blk.0.ffn_up.weight", 2),
+                _make_tensor("blk.1.ffn_up.weight", 2),
+                _make_tensor("blk.2.ffn_up.weight", 2),
+            ]
+
+            params = build_params(Path("dummy.gguf"))
+            types = params.tensor_types
+
+            assert len(types) == 1
+            assert r"(\d+)" in types[0]
+            assert _matches(types[0], "blk.0.ffn_up.weight", "Q4_K")
+            assert _matches(types[0], "blk.42.ffn_up.weight", "Q4_K")
+
+
+def test_build_params_mixed_grouped() -> None:
+    """Layers with different qtypes produce grouped regex by qtype."""
+    with patch("gguf_clone.params.GGUFReader") as MockReader:
+        mock_instance = cast(MagicMock, MockReader.return_value)
+        with patch("gguf_clone.params.GGMLQuantizationType") as MockQType:
+            MockQType.side_effect = _qtype_factory({2: "Q4_K", 3: "Q6_K"})
+
+            mock_instance.tensors = [
+                _make_tensor("blk.0.ffn_up.weight", 2),
+                _make_tensor("blk.1.ffn_up.weight", 3),
+            ]
+
+            params = build_params(Path("dummy.gguf"))
+            types = params.tensor_types
+
+            assert len(types) == 2
+            assert _matches(types[0], "blk.0.ffn_up.weight", "Q4_K")
+            assert _matches(types[1], "blk.1.ffn_up.weight", "Q6_K")
+            # No wildcard -- grouped alternation instead
+            assert not any(r"(\d+)" in t for t in types)
 
 
 def test_copy_imatrix_copies_file(tmp_path: Path) -> None:
