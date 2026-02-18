@@ -101,8 +101,9 @@ def main() -> None:
     )
     _ = params_parser.add_argument(
         "patterns",
-        nargs="+",
-        help="glob pattern(s) to match GGUF files (same as config template.ggufs)",
+        nargs="*",
+        default=["*.gguf"],
+        help="glob pattern(s) to match GGUF files (default: *.gguf)",
     )
     _ = params_parser.add_argument(
         "-o",
