@@ -16,7 +16,7 @@ def write_gguf(path: Path, *, arch: str, metadata: MetadataMap) -> None:
         writer.add_key_value(key, value, value_type, sub_type=sub_type)
 
     tensor = np.zeros((1,), dtype=np.float32)
-    writer.add_tensor_info(  # pyright: ignore[reportUnknownMemberType]
+    writer.add_tensor_info(
         "tensor",
         tensor.shape,
         tensor.dtype,

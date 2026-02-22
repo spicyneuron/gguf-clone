@@ -110,7 +110,7 @@ def copy_template_metadata(
         writer.add_key_value(key, value.value, value.value_type, sub_type=value.sub_type)
 
     for tensor in target_reader.tensors:
-        writer.add_tensor_info(  # pyright: ignore[reportUnknownMemberType]
+        writer.add_tensor_info(
             tensor.name,
             tensor.data.shape,
             tensor.data.dtype,
@@ -214,7 +214,7 @@ def apply_metadata(
 
     # Copy tensor info and data
     for tensor in target_reader.tensors:
-        writer.add_tensor_info(  # pyright: ignore[reportUnknownMemberType]
+        writer.add_tensor_info(
             tensor.name,
             tensor.data.shape,
             tensor.data.dtype,
