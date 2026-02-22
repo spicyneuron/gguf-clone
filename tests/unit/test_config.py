@@ -15,7 +15,10 @@ def test_load_config_valid(tmp_path: Path) -> None:
             "copy_metadata": ["tokenizer.chat_template"],
             "copy_files": ["*mmproj*"],
         },
-        "target": {"repo": "unsloth/Qwen3-0.6B"},
+        "target": {
+            "repo": "unsloth/Qwen3-0.6B",
+            "exclude_files": ["*.md", "*.txt"],
+        },
         "output": {
             "prefix": "test_prefix",
             "split": "25G",
@@ -42,6 +45,7 @@ def test_load_config_valid(tmp_path: Path) -> None:
     assert config.template_copy_metadata == ["tokenizer.chat_template"]
     assert config.template_copy_files == ["*mmproj*"]
     assert config.target_repo == "unsloth/Qwen3-0.6B"
+    assert config.target_exclude_files == ["*.md", "*.txt"]
     assert config.output_prefix == "test_prefix"
     assert config.output_split == "25G"
     assert config.output_converted_dir == "custom_converted"
@@ -77,6 +81,7 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.template_gguf_patterns == ["*gguf"]
     assert config.template_copy_metadata == []
     assert config.template_copy_files == []
+    assert config.target_exclude_files == []
 
 
 def test_load_config_missing_keys(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
@@ -164,6 +169,21 @@ def test_load_config_override_apply_metadata(tmp_path: Path) -> None:
         "general.quantized_by": "custom-user",
         "general.custom_field": "custom-value",
     }
+
+
+def test_load_config_exclude_files_string(tmp_path: Path) -> None:
+    config_data = {
+        "template": {"repo": "repo", "imatrix": "imatrix", "ggufs": "*gguf"},
+        "target": {"repo": "target", "exclude_files": "*.bin"},
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.target_exclude_files == ["*.bin"]
 
 
 def test_load_config_clear_apply_metadata(tmp_path: Path) -> None:

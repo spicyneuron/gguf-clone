@@ -42,6 +42,7 @@ class RunConfig:
     template_copy_metadata: list[str]
     template_copy_files: list[str]
     target_repo: str
+    target_exclude_files: list[str]
     output_prefix: str
     output_split: str
     output_converted_dir: str
@@ -67,6 +68,7 @@ class TemplateConfig(BaseModel):
 
 class TargetConfig(BaseModel):
     repo: str
+    exclude_files: StrList = []
 
 
 class OutputConfig(BaseModel):
@@ -101,6 +103,7 @@ def load_config(path: Path) -> RunConfig | None:
         template_copy_metadata=config.template.copy_metadata,
         template_copy_files=config.template.copy_files,
         target_repo=config.target.repo,
+        target_exclude_files=config.target.exclude_files,
         output_prefix=config.output.prefix,
         output_split=config.output.split,
         output_converted_dir=config.output.converted_dir,
@@ -208,6 +211,11 @@ def run(
             indent=stage_indent,
         )
     log_line(f"Target repo: {config.target_repo}", indent=stage_indent)
+    if config.target_exclude_files:
+        log_line(
+            f"Target exclude: {', '.join(config.target_exclude_files)}",
+            indent=stage_indent,
+        )
     log_line(f"Output prefix: {config.output_prefix}", indent=stage_indent)
     log_line(f"Output split: {config.output_split}", indent=stage_indent)
 
@@ -217,6 +225,7 @@ def run(
         template_imatrix_pattern=config.template_imatrix_pattern,
         template_copy_files=config.template_copy_files,
         target_repo=config.target_repo,
+        target_exclude_files=config.target_exclude_files,
     )
     if not resolved:
         return 1

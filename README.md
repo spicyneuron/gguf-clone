@@ -92,6 +92,11 @@ template:
 target:
   repo: unsloth/Qwen3-0.6B
 
+  # Skip downloading unnecessary files from the target repo
+  exclude_files:
+    - "*.onnx"
+    - "GGUFs/*"
+
 output:
   # Output model is named PREFIX-ORG-MODEL
   prefix: not-unsloth

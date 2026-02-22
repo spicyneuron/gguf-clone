@@ -275,6 +275,7 @@ def resolve_models(
     template_imatrix_pattern: str,
     template_copy_files: list[str],
     target_repo: str,
+    target_exclude_files: list[str] | None = None,
 ) -> ResolvedModels | None:
     try:
         template_snapshot = resolve_hf_repo(
@@ -324,6 +325,7 @@ def resolve_models(
     try:
         target_snapshot = resolve_hf_repo(
             target_repo,
+            ignore_patterns=target_exclude_files or None,
             local_files_only=False,
         )
     except ModelResolutionError as exc:
