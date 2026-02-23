@@ -21,7 +21,13 @@ from .common import (
 from .convert import convert_target
 from .files import copy_template_files
 from .metadata import apply_metadata, copy_template_metadata
-from .params import build_params_payload, copy_imatrix, load_params, save_params_payload
+from .params import (
+    ParamsPayload,
+    build_params_payload,
+    copy_imatrix,
+    load_params,
+    save_params_payload,
+)
 from .quantize import quantize_gguf
 from .resolve import (
     ToolResolutionError,
@@ -192,6 +198,15 @@ def _collect_split_outputs(output_path: Path, quant_label: str) -> list[Path]:
     return sorted(split_dir.glob(f"{output_path.stem}-*-of-*.gguf"))
 
 
+def _imatrix_exists(imatrix: str, *, work_dir: Path) -> bool:
+    if not imatrix:
+        return True
+    imatrix_path = Path(imatrix)
+    if not imatrix_path.is_absolute():
+        imatrix_path = work_dir / imatrix_path
+    return imatrix_path.exists()
+
+
 def run(
     config_path: Path,
     *,
@@ -320,12 +335,8 @@ def run(
             print(f"Converted GGUF not found: {converted_gguf}")
             return 1
 
-    # Copy imatrix to workspace so GGUF metadata uses a relative path
-    imatrix_rel_path = copy_imatrix(
-        resolved.template_imatrix, params_dir, prefix=config.output_params_dir
-    )
-
     template_repo_slug = source_slug(config.template_repo, config.template_path)
+    imatrix_rel_path: str | None = None
     for template_group in resolved.template_ggufs:
         shard_suffix = ""
         if len(template_group) > 1:
@@ -344,8 +355,16 @@ def run(
                 print(f"  {label}")
             return 1
         stem_label = next(iter(stem_labels), None)
-        payload, params = build_params_payload(template_group, imatrix_rel_path)
-        quant_label = stem_label or params.default_type
+        payload: ParamsPayload | None = None
+        quant_label = stem_label or ""
+        if not stem_label:
+            imatrix_hint = (
+                f"{config.output_params_dir}/{resolved.template_imatrix.name}"
+                if config.output_params_dir
+                else resolved.template_imatrix.name
+            )
+            payload, params = build_params_payload(template_group, imatrix_hint)
+            quant_label = params.default_type
         params_path = params_dir / f"{template_repo_slug}-{quant_label}.json"
         action = confirm_overwrite([params_path], "params", indent=stage_indent)
         if action == "cancel":
@@ -358,9 +377,34 @@ def run(
             tensor_types = loaded.tensor_types
             default_type = loaded.default_type
             imatrix = loaded.imatrix
+            if not _imatrix_exists(imatrix, work_dir=work_dir):
+                if imatrix_rel_path is None:
+                    imatrix_rel_path = copy_imatrix(
+                        resolved.template_imatrix,
+                        params_dir,
+                        prefix=config.output_params_dir,
+                    )
+                imatrix = imatrix_rel_path
             if not stem_label:
                 quant_label = default_type
         else:
+            if imatrix_rel_path is None:
+                # Copy imatrix only when we are actually writing params.
+                imatrix_rel_path = copy_imatrix(
+                    resolved.template_imatrix,
+                    params_dir,
+                    prefix=config.output_params_dir,
+                )
+
+            if payload is None:
+                payload, _ = build_params_payload(template_group, imatrix_rel_path)
+            elif payload.imatrix != imatrix_rel_path:
+                payload = ParamsPayload(
+                    tensor_types=payload.tensor_types,
+                    default_type=payload.default_type,
+                    imatrix=imatrix_rel_path,
+                )
+
             if params_path.exists() and not remove_files([params_path]):
                 return 1
             save_params_payload(payload, params_path)
@@ -397,6 +441,8 @@ def run(
                 )
             continue
         if output_path.exists() and not remove_files([output_path]):
+            return 1
+        if existing_splits and not remove_files(existing_splits):
             return 1
 
         result = quantize_gguf(
