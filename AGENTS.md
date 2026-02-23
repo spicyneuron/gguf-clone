@@ -1,0 +1,5 @@
+- Always use `uv` for Python commands and dependency management. Run outside of sandbox if need. Don't create extra cache_dirs.
+- Aside from trivial changes, run automated checks before handing off to the user:
+  - `uv run ruff check .`
+  - `uv run basedpyright`
+  - `uv run pytest tests/unit`

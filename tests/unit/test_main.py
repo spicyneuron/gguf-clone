@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -79,7 +80,11 @@ def _fake_quantize(
     return 0
 
 
-def _patch_base(config: RunConfig, resolved: ResolvedModels, tools: ToolPaths) -> list[object]:
+def _patch_base(
+    config: RunConfig,
+    resolved: ResolvedModels,
+    tools: ToolPaths,
+) -> list[AbstractContextManager[object]]:
     return [
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
@@ -99,6 +104,7 @@ def test_run_use_existing_params_skips_preconfirm_work(tmp_path: Path) -> None:
     params_path = tmp_path / "params" / "org-template-Q4_K.json"
     params_path.parent.mkdir(parents=True, exist_ok=True)
     _ = params_path.write_text("{}")
+    _ = (tmp_path / "params" / "imatrix.dat").write_bytes(b"imatrix")
     payload = ParamsPayload(
         tensor_types=["tensor.weight=Q4_K"],
         default_type="Q4_K",
@@ -123,6 +129,64 @@ def test_run_use_existing_params_skips_preconfirm_work(tmp_path: Path) -> None:
     assert result == 0
     copy_mock.assert_not_called()
     build_mock.assert_not_called()
+
+
+def test_run_use_existing_params_copies_missing_imatrix(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yml"
+    _ = config_path.write_text("stub")
+    config = _make_config()
+    resolved = _make_resolved(tmp_path)
+    tools = _make_tools()
+    params_path = tmp_path / "params" / "org-template-Q4_K.json"
+    params_path.parent.mkdir(parents=True, exist_ok=True)
+    _ = params_path.write_text("{}")
+    payload = ParamsPayload(
+        tensor_types=["tensor.weight=Q4_K"],
+        default_type="Q4_K",
+        imatrix="params/imatrix.dat",
+    )
+
+    seen_imatrix: list[str] = []
+
+    def fake_quantize(
+        _input_path: Path,
+        output_path: Path,
+        *,
+        tensor_types: list[str],
+        default_type: str,
+        imatrix: str,
+        llama_quantize: Path,
+        cwd: Path | None = None,
+        indent: str = "",
+    ) -> int:
+        del tensor_types, default_type, llama_quantize, cwd, indent
+        seen_imatrix.append(imatrix)
+        _ = output_path.write_bytes(b"q")
+        return 0
+
+    patches = _patch_base(config, resolved, tools)
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patch("gguf_clone.main.load_params", return_value=payload),
+        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
+        patch("gguf_clone.main.copy_imatrix", return_value="params/imatrix.dat") as copy_mock,
+        patch("gguf_clone.main.build_params_payload") as build_mock,
+    ):
+        result = run(config_path, overwrite_behavior="use")
+
+    assert result == 0
+    copy_mock.assert_called_once_with(
+        resolved.template_imatrix,
+        tmp_path / "params",
+        prefix="params",
+    )
+    build_mock.assert_not_called()
+    assert seen_imatrix == ["params/imatrix.dat"]
 
 
 def test_run_overwrite_params_confirms_before_copy_and_build(tmp_path: Path) -> None:

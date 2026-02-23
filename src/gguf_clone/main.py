@@ -151,6 +151,15 @@ def _collect_split_outputs(output_path: Path, quant_label: str) -> list[Path]:
     return sorted(split_dir.glob(f"{output_path.stem}-*-of-*.gguf"))
 
 
+def _imatrix_exists(imatrix: str, *, work_dir: Path) -> bool:
+    if not imatrix:
+        return True
+    imatrix_path = Path(imatrix)
+    if not imatrix_path.is_absolute():
+        imatrix_path = work_dir / imatrix_path
+    return imatrix_path.exists()
+
+
 def run(
     config_path: Path,
     *,
@@ -301,6 +310,14 @@ def run(
             tensor_types = loaded.tensor_types
             default_type = loaded.default_type
             imatrix = loaded.imatrix
+            if not _imatrix_exists(imatrix, work_dir=work_dir):
+                if imatrix_rel_path is None:
+                    imatrix_rel_path = copy_imatrix(
+                        resolved.template_imatrix,
+                        params_dir,
+                        prefix=config.output_params_dir,
+                    )
+                imatrix = imatrix_rel_path
             if not stem_label:
                 quant_label = default_type
         else:
