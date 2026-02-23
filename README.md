@@ -53,6 +53,11 @@ Outputs are generated alongside the config file by default:
 - `params/*.json` - `llama-quantize` paramaters extracted from template GGUF(s)
 - `quantized/*.gguf` - Final quantized outputs
 
+Output file names are keyed by source:
+
+- Hugging Face sources use the repo id (for example `unsloth-Qwen3-0.6B`)
+- Local `path` sources only the path leaf name (for example `/a/exp1/model` and `/b/exp2/model` both become `model`)
+
 ## Configuration
 
 Use either `repo` or `path` for each template and target (exactly one per section):

@@ -150,6 +150,7 @@ def source_slug(repo: str | None, path: Path | None) -> str:
         return repo_slug(repo)
     if not path:
         return "model"
+    # NOTE: Can collide if local `path` sources share same leaf, but easy to avoid with output.prefix or output dirs
     name = path.stem if path.suffix else path.name
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-")
     return slug or "model"
