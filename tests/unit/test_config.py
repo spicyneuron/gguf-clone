@@ -40,11 +40,13 @@ def test_load_config_valid(tmp_path: Path) -> None:
     assert config is not None
     assert isinstance(config, RunConfig)
     assert config.template_repo == "unsloth/Qwen3-0.6B-GGUF"
+    assert config.template_path is None
     assert config.template_imatrix_pattern == "*imatrix*"
     assert config.template_gguf_patterns == ["*UD-IQ1_M.gguf"]
     assert config.template_copy_metadata == ["tokenizer.chat_template"]
     assert config.template_copy_files == ["*mmproj*"]
     assert config.target_repo == "unsloth/Qwen3-0.6B"
+    assert config.target_path is None
     assert config.target_exclude_files == ["*.md", "*.txt"]
     assert config.output_prefix == "test_prefix"
     assert config.output_split == "25G"
@@ -81,6 +83,8 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.template_gguf_patterns == ["*gguf"]
     assert config.template_copy_metadata == []
     assert config.template_copy_files == []
+    assert config.template_path is None
+    assert config.target_path is None
     assert config.target_exclude_files == []
 
 
@@ -123,6 +127,79 @@ def test_load_config_invalid_types(tmp_path: Path, capsys: CaptureFixture[str]) 
     captured = capsys.readouterr()
     assert "template.repo" in captured.out or "repo" in captured.out
     assert "str" in captured.out.lower()
+
+
+def test_load_config_path_sources(tmp_path: Path) -> None:
+    template_dir = tmp_path / "models" / "template"
+    target_dir = tmp_path / "models" / "target"
+    template_dir.mkdir(parents=True)
+    target_dir.mkdir(parents=True)
+
+    config_data = {
+        "template": {
+            "path": "models/template",
+            "imatrix": "imatrix.dat",
+            "ggufs": "*gguf",
+        },
+        "target": {
+            "path": "models/target",
+        },
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.template_repo is None
+    assert config.target_repo is None
+    assert config.template_path == template_dir
+    assert config.target_path == target_dir
+
+
+def test_load_config_rejects_both_repo_and_path(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    config_data = {
+        "template": {
+            "repo": "repo",
+            "path": "./template",
+            "imatrix": "imatrix",
+            "ggufs": "*gguf",
+        },
+        "target": {"repo": "target"},
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is None
+    captured = capsys.readouterr()
+    assert "exactly one of 'repo' or 'path'" in captured.out
+
+
+def test_load_config_rejects_missing_repo_and_path(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    config_data = {
+        "template": {
+            "imatrix": "imatrix",
+            "ggufs": "*gguf",
+        },
+        "target": {"repo": "target"},
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is None
+    captured = capsys.readouterr()
+    assert "exactly one of 'repo' or 'path'" in captured.out
 
 
 def test_load_config_partial_directory_overrides(tmp_path: Path) -> None:

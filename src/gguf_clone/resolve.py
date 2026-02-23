@@ -190,6 +190,13 @@ class ModelResolutionError(RuntimeError):
     pass
 
 
+def _resolve_local_source(path: Path, label: str) -> Path:
+    resolved = path.expanduser()
+    if not resolved.exists():
+        raise ModelResolutionError(f"{label} path not found: {resolved}")
+    return resolved
+
+
 def resolve_hf_repo(
     repo_id: str,
     *,
@@ -270,27 +277,43 @@ def match_pattern(
 
 def resolve_models(
     *,
-    template_repo: str,
+    template_repo: str | None,
+    template_path: Path | None,
     template_gguf_patterns: list[str],
     template_imatrix_pattern: str,
     template_copy_files: list[str],
-    target_repo: str,
+    target_repo: str | None,
+    target_path: Path | None,
     target_exclude_files: list[str] | None = None,
 ) -> ResolvedModels | None:
-    try:
-        template_snapshot = resolve_hf_repo(
-            template_repo,
-            allow_patterns=[
-                *template_gguf_patterns,
-                template_imatrix_pattern,
-                *template_copy_files,
-            ],
-            local_files_only=False,
+    template_source = template_path
+    if template_source is not None:
+        try:
+            template_source = _resolve_local_source(template_source, "Template")
+        except ModelResolutionError as exc:
+            print(str(exc))
+            return None
+        template_snapshot = (
+            template_source.parent if template_source.is_file() else template_source
         )
-    except ModelResolutionError as exc:
-        print(str(exc))
-        return None
-    template_snapshot = Path(template_snapshot)
+    else:
+        if template_repo is None:
+            print("Template source is not configured.")
+            return None
+        try:
+            template_snapshot = resolve_hf_repo(
+                template_repo,
+                allow_patterns=[
+                    *template_gguf_patterns,
+                    template_imatrix_pattern,
+                    *template_copy_files,
+                ],
+                local_files_only=False,
+            )
+        except ModelResolutionError as exc:
+            print(str(exc))
+            return None
+        template_snapshot = Path(template_snapshot)
 
     gguf_candidates = [
         path for path in template_snapshot.rglob("*.gguf") if path.is_file()
@@ -322,16 +345,32 @@ def resolve_models(
             return None
         template_ggufs.append(template_group)
 
-    try:
-        target_snapshot = resolve_hf_repo(
-            target_repo,
-            ignore_patterns=target_exclude_files or None,
-            local_files_only=False,
-        )
-    except ModelResolutionError as exc:
-        print(str(exc))
-        return None
-    target_snapshot = Path(target_snapshot)
+    target_source = target_path
+    if target_source is not None:
+        try:
+            target_snapshot = _resolve_local_source(target_source, "Target")
+        except ModelResolutionError as exc:
+            print(str(exc))
+            return None
+        if target_snapshot.is_file() and target_snapshot.suffix.lower() != ".gguf":
+            print("Target path must be a directory or a .gguf file.")
+            return None
+        if target_exclude_files:
+            print("Ignoring target.exclude_files for local target path.")
+    else:
+        if target_repo is None:
+            print("Target source is not configured.")
+            return None
+        try:
+            target_snapshot = resolve_hf_repo(
+                target_repo,
+                ignore_patterns=target_exclude_files or None,
+                local_files_only=False,
+            )
+        except ModelResolutionError as exc:
+            print(str(exc))
+            return None
+        target_snapshot = Path(target_snapshot)
 
     return ResolvedModels(
         template_snapshot=template_snapshot,

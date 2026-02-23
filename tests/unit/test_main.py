@@ -12,11 +12,13 @@ from gguf_clone.resolve import ResolvedModels, ToolPaths
 def _make_config(*, split: str = "50G") -> RunConfig:
     return RunConfig(
         template_repo="org/template",
+        template_path=None,
         template_gguf_patterns=["*.gguf"],
         template_imatrix_pattern="*imatrix*",
         template_copy_metadata=[],
         template_copy_files=[],
         target_repo="org/target",
+        target_path=None,
         target_exclude_files=[],
         output_prefix="",
         output_split=split,
