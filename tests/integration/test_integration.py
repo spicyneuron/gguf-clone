@@ -36,13 +36,16 @@ def _resolve_template_snapshot(config: main.RunConfig) -> Path:
         config.template_imatrix_pattern,
         *config.template_copy_files,
     ]
-    return Path(
-        resolve_hf_repo(
-            config.template_repo,
-            allow_patterns=allow_patterns,
-            local_files_only=True,
+    if config.template_repo is not None:
+        return Path(
+            resolve_hf_repo(
+                config.template_repo,
+                allow_patterns=allow_patterns,
+                local_files_only=True,
+            )
         )
-    )
+    assert config.template_path is not None
+    return config.template_path.parent if config.template_path.is_file() else config.template_path
 
 
 def _collect_template_groups(
@@ -96,8 +99,8 @@ def _build_template_groups(
     if raw_groups is None:
         return None
 
-    template_repo_slug = main.repo_slug(config.template_repo)
-    target_repo_slug = main.repo_slug(config.target_repo)
+    template_repo_slug = main.source_slug(config.template_repo, config.template_path)
+    target_repo_slug = main.source_slug(config.target_repo, config.target_path)
     prefix = main.prefix_slug(config.output_prefix)
 
     groups: list[TemplateGroup] = []
