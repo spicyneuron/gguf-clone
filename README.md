@@ -12,8 +12,8 @@ In theory, fine-tunes should benefit from the same imatrix data and optimization
 ## Key Features
 
 - Simple YAML config
-- Use any Hugging Face GGUF as **template** (model to copy from)
-- Use any Hugging Face model as **target** (model to quantize)
+- Use a Hugging Face repo or local path as **template** (model to copy from)
+- Use a Hugging Face repo or local path as **target** (model to quantize)
 - Optionally copy GGUF metatdata and loose files (mmproj, etc)
 - Run multiple quantizations from the same template
 - Use split GGUFs as template input and/or target output
@@ -53,9 +53,20 @@ Outputs are generated alongside the config file by default:
 - `params/*.json` - `llama-quantize` paramaters extracted from template GGUF(s)
 - `quantized/*.gguf` - Final quantized outputs
 
+Output file names are keyed by source:
+
+- Hugging Face sources use the repo id (for example `unsloth-Qwen3-0.6B`)
+- Local `path` sources only the path leaf name (for example `/a/exp1/model` and `/b/exp2/model` both become `model`)
+
 ## Configuration
 
-This tool uses Hugging Face under-the-hood for convience. Use the `ORG/MODEL` labels to designate the template and target models. All matched original files will be downloaded to your local Hugging Face cache.
+Use either `repo` or `path` for each template and target (exactly one per section):
+
+- `repo`: `ORG/MODEL` on Hugging Face
+- `path`: local directory (or `.gguf` file for target only)
+
+Template matching still uses `ggufs`, `imatrix`, and `copy_files` patterns.  
+`target.exclude_files` is only used for Hugging Face downloads.
 
 Minimal example (only required fields):
 
@@ -69,11 +80,25 @@ target:
   repo: Qwen/Qwen3-0.6B
 ```
 
+Local-path example:
+
+```yaml
+template:
+  path: ./models/template
+  imatrix: "*imatrix*"
+  ggufs: "*UD-IQ1_M*.gguf"
+  
+target:
+  path: ./models/target
+```
+
 All options:
 
 ```yaml
 template:
+  # Exactly one of repo or path
   repo: unsloth/Qwen3-0.6B-GGUF
+  # path: ./models/template
   imatrix: "*imatrix*"
   
   # List multiple patterns to create multiple quantizations
@@ -90,9 +115,12 @@ template:
     - "*mmproj*"
 
 target:
+  # Exactly one of repo or path
   repo: unsloth/Qwen3-0.6B
+  # path: ./models/target
+  # path: ./models/already-converted.gguf  # skips conversion step
 
-  # Skip downloading unnecessary files from the target repo
+  # Skip downloading unnecessary files from the target repo (HF only)
   exclude_files:
     - "*.onnx"
     - "GGUFs/*"

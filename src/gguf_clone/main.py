@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, cast
 
 import yaml
-from pydantic import BaseModel, BeforeValidator, ValidationError
+from pydantic import BaseModel, BeforeValidator, ValidationError, model_validator
 
 from .common import (
     OverwriteBehavior,
@@ -36,12 +36,14 @@ from .split import split_gguf, split_needed
 
 @dataclass(frozen=True)
 class RunConfig:
-    template_repo: str
+    template_repo: str | None
+    template_path: Path | None
     template_gguf_patterns: list[str]
     template_imatrix_pattern: str
     template_copy_metadata: list[str]
     template_copy_files: list[str]
-    target_repo: str
+    target_repo: str | None
+    target_path: Path | None
     target_exclude_files: list[str]
     output_prefix: str
     output_split: str
@@ -59,16 +61,30 @@ StrList = Annotated[list[str], BeforeValidator(_ensure_list)]
 
 
 class TemplateConfig(BaseModel):
-    repo: str
+    repo: str | None = None
+    path: Path | None = None
     ggufs: StrList
     imatrix: str
     copy_metadata: StrList = []
     copy_files: StrList = []
 
+    @model_validator(mode="after")
+    def _validate_source(self) -> "TemplateConfig":
+        if (self.repo is None) == (self.path is None):
+            raise ValueError("template requires exactly one of 'repo' or 'path'.")
+        return self
+
 
 class TargetConfig(BaseModel):
-    repo: str
+    repo: str | None = None
+    path: Path | None = None
     exclude_files: StrList = []
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> "TargetConfig":
+        if (self.repo is None) == (self.path is None):
+            raise ValueError("target requires exactly one of 'repo' or 'path'.")
+        return self
 
 
 class OutputConfig(BaseModel):
@@ -88,6 +104,15 @@ class ConfigFile(BaseModel):
     output: OutputConfig = OutputConfig()
 
 
+def _resolve_source_path(source_path: Path | None, config_dir: Path) -> Path | None:
+    if source_path is None:
+        return None
+    resolved = source_path.expanduser()
+    if resolved.is_absolute():
+        return resolved
+    return (config_dir / resolved).resolve()
+
+
 def load_config(path: Path) -> RunConfig | None:
     try:
         data = cast(object, yaml.safe_load(path.read_text()))
@@ -96,13 +121,16 @@ def load_config(path: Path) -> RunConfig | None:
         print(f"Failed to read config: {exc}")
         return None
 
+    config_dir = path.parent.resolve()
     return RunConfig(
         template_repo=config.template.repo,
+        template_path=_resolve_source_path(config.template.path, config_dir),
         template_gguf_patterns=config.template.ggufs,
         template_imatrix_pattern=config.template.imatrix,
         template_copy_metadata=config.template.copy_metadata,
         template_copy_files=config.template.copy_files,
         target_repo=config.target.repo,
+        target_path=_resolve_source_path(config.target.path, config_dir),
         target_exclude_files=config.target.exclude_files,
         output_prefix=config.output.prefix,
         output_split=config.output.split,
@@ -115,6 +143,25 @@ def load_config(path: Path) -> RunConfig | None:
 
 def repo_slug(repo_id: str) -> str:
     return repo_id.replace("/", "-")
+
+
+def source_slug(repo: str | None, path: Path | None) -> str:
+    if repo:
+        return repo_slug(repo)
+    if not path:
+        return "model"
+    # NOTE: Can collide if local `path` sources share same leaf, but easy to avoid with output.prefix or output dirs
+    name = path.stem if path.suffix else path.name
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-")
+    return slug or "model"
+
+
+def source_desc(repo: str | None, path: Path | None) -> str:
+    if repo:
+        return f"repo:{repo}"
+    if path:
+        return f"path:{path}"
+    return "unknown"
 
 
 def prefix_slug(prefix: str) -> str:
@@ -192,7 +239,10 @@ def run(
     quantized_dir.mkdir(parents=True, exist_ok=True)
 
     stage_indent = log_stage("Validating inputs")
-    log_line(f"Template repo: {config.template_repo}", indent=stage_indent)
+    log_line(
+        f"Template source: {source_desc(config.template_repo, config.template_path)}",
+        indent=stage_indent,
+    )
     log_line(
         f"Template GGUFs: {', '.join(config.template_gguf_patterns)}",
         indent=stage_indent,
@@ -210,7 +260,10 @@ def run(
             f"Template file copy: {', '.join(config.template_copy_files)}",
             indent=stage_indent,
         )
-    log_line(f"Target repo: {config.target_repo}", indent=stage_indent)
+    log_line(
+        f"Target source: {source_desc(config.target_repo, config.target_path)}",
+        indent=stage_indent,
+    )
     if config.target_exclude_files:
         log_line(
             f"Target exclude: {', '.join(config.target_exclude_files)}",
@@ -221,44 +274,58 @@ def run(
 
     resolved = resolve_models(
         template_repo=config.template_repo,
+        template_path=config.template_path,
         template_gguf_patterns=config.template_gguf_patterns,
         template_imatrix_pattern=config.template_imatrix_pattern,
         template_copy_files=config.template_copy_files,
         target_repo=config.target_repo,
+        target_path=config.target_path,
         target_exclude_files=config.target_exclude_files,
     )
     if not resolved:
         return 1
 
     prefix = prefix_slug(config.output_prefix)
-    target_repo_slug = repo_slug(config.target_repo)
+    target_repo_slug = source_slug(config.target_repo, config.target_path)
     converted_name = f"{target_repo_slug}.gguf"
 
-    stage_indent = log_stage("Converting target model to GGUF")
-    result = convert_target(
-        resolved.target_snapshot,
-        output_dir=converted_dir,
-        outfile_name=converted_name,
-        existing_glob=converted_name,
-        convert_script=tools.convert_hf_to_gguf,
-        cwd=work_dir,
-        indent=stage_indent,
-        use_message="Using existing converted outputs.",
-    )
-    if result != 0:
-        return result
+    converted_gguf: Path
+    if (
+        resolved.target_snapshot.is_file()
+        and resolved.target_snapshot.suffix.lower() == ".gguf"
+    ):
+        stage_indent = log_stage("Using target GGUF directly")
+        converted_gguf = resolved.target_snapshot
+        log_success(
+            f"Using local GGUF target without conversion: {converted_gguf}",
+            indent=stage_indent,
+        )
+    else:
+        stage_indent = log_stage("Converting target model to GGUF")
+        result = convert_target(
+            resolved.target_snapshot,
+            output_dir=converted_dir,
+            outfile_name=converted_name,
+            existing_glob=converted_name,
+            convert_script=tools.convert_hf_to_gguf,
+            cwd=work_dir,
+            indent=stage_indent,
+            use_message="Using existing converted outputs.",
+        )
+        if result != 0:
+            return result
 
-    converted_gguf = converted_dir / converted_name
-    if not converted_gguf.exists():
-        print(f"Converted GGUF not found: {converted_gguf}")
-        return 1
+        converted_gguf = converted_dir / converted_name
+        if not converted_gguf.exists():
+            print(f"Converted GGUF not found: {converted_gguf}")
+            return 1
 
     # Copy imatrix to workspace so GGUF metadata uses a relative path
     imatrix_rel_path = copy_imatrix(
         resolved.template_imatrix, params_dir, prefix=config.output_params_dir
     )
 
-    template_repo_slug = repo_slug(config.template_repo)
+    template_repo_slug = source_slug(config.template_repo, config.template_path)
     for template_group in resolved.template_ggufs:
         shard_suffix = ""
         if len(template_group) > 1:
