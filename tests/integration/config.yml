@@ -1,20 +1,22 @@
-template:
-  repo: unsloth/Qwen3-0.6B-GGUF
-  imatrix: "*imatrix*"
+version: 2
+
+source:
+  template: unsloth/Qwen3-0.6B-GGUF
+  target: Qwen/Qwen3-0.6B
+
+output_dir: test-output
+
+extract_params:
   ggufs:
     - "*UD-IQ1_M.gguf"
     - "*UD-Q2_K_XL.gguf"
+
+quantize_gguf:
+  target_convert: true
+  imatrix: "*imatrix*"
+  output_max_size: 350M
   copy_metadata:
     - tokenizer.chat_template
   copy_files:
     - README.md
-
-target:
-  repo: Qwen/Qwen3-0.6B
-
-output:
-  prefix: test
-  split: 350M
-  converted_dir: test-converted
-  params_dir: test-params
-  quantized_dir: test-quantized
+  apply_metadata: {}

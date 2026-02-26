@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .config import SourceRef
+
 if TYPE_CHECKING:
 
     def _hf_hub_download(*_args: object, **_kwargs: object) -> str: ...
@@ -273,6 +275,27 @@ def match_pattern(
             print(f"  ...and {len(matches) - 5} more")
         return None
     return matches
+
+
+def resolve_source_snapshot(
+    ref: SourceRef,
+    *,
+    allow_patterns: list[str] | None = None,
+    ignore_patterns: list[str] | None = None,
+) -> Path:
+    """Resolve a SourceRef to a local directory path.
+
+    Local paths are validated; HF repos are downloaded (with caching).
+    """
+    if ref.path is not None:
+        return _resolve_local_source(ref.path, "Source")
+    if ref.repo is None:
+        raise ModelResolutionError("Source has no repo or path configured.")
+    return resolve_hf_repo(
+        ref.repo,
+        allow_patterns=allow_patterns,
+        ignore_patterns=ignore_patterns,
+    )
 
 
 def resolve_models(

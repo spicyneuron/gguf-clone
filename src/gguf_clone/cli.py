@@ -5,48 +5,117 @@ import sys
 from pathlib import Path
 from typing import cast
 
+from . import config as config_mod
+from .artifacts import Artifacts
 from .common import OverwriteBehavior
-from .main import run
-from .params import extract_params
+from .main import run_extract_params, run_pipeline, run_quantize_gguf
+
+
+def _overwrite_from_args(args: argparse.Namespace) -> OverwriteBehavior | None:
+    if cast(bool, args.use_existing):
+        return "use"
+    if cast(bool, args.overwrite):
+        return "overwrite"
+    if cast(bool, args.cancel):
+        return "cancel"
+    return None
+
+
+def _load_config_and_artifacts(
+    config_path: Path,
+) -> tuple[config_mod.RunConfig, Artifacts] | None:
+    config = config_mod.load_config(config_path)
+    if not config:
+        return None
+    artifacts = Artifacts.from_config(config.output_dir, config.template, config.target)
+    return config, artifacts
 
 
 def _dispatch_run(args: argparse.Namespace) -> int:
     config_path = cast(Path, args.config).expanduser()
-    use_existing = cast(bool, args.use_existing)
-    overwrite = cast(bool, args.overwrite)
-    cancel = cast(bool, args.cancel)
-    overwrite_behavior: OverwriteBehavior | None = None
-    if use_existing:
-        overwrite_behavior = "use"
-    elif overwrite:
-        overwrite_behavior = "overwrite"
-    elif cancel:
-        overwrite_behavior = "cancel"
-    return run(
+    return run_pipeline(
         config_path,
         verbose=cast(bool, args.verbose),
-        overwrite_behavior=overwrite_behavior,
+        overwrite_behavior=_overwrite_from_args(args),
     )
 
 
-def _dispatch_params(args: argparse.Namespace) -> int:
-    directory = cast(Path, args.directory).expanduser().resolve()
-    output = cast(Path | None, args.output)
-    if output is not None:
-        output = output.expanduser()
-    return extract_params(
-        directory,
-        cast(list[str], args.patterns),
-        output,
+def _dispatch_extract_params(args: argparse.Namespace) -> int:
+    config_path = cast(Path, args.config).expanduser()
+    loaded = _load_config_and_artifacts(config_path)
+    if not loaded:
+        return 1
+    config, artifacts = loaded
+    if config.extract_params is None:
+        print("extract_params section missing from config.")
+        return 1
+    return run_extract_params(
+        config,
+        artifacts,
+        verbose=cast(bool, args.verbose),
+        overwrite_behavior=_overwrite_from_args(args),
     )
+
+
+def _dispatch_quantize_gguf(args: argparse.Namespace) -> int:
+    config_path = cast(Path, args.config).expanduser()
+    loaded = _load_config_and_artifacts(config_path)
+    if not loaded:
+        return 1
+    config, artifacts = loaded
+    if config.quantize_gguf is None:
+        print("quantize_gguf section missing from config.")
+        return 1
+    return run_quantize_gguf(
+        config,
+        artifacts,
+        verbose=cast(bool, args.verbose),
+        overwrite_behavior=_overwrite_from_args(args),
+    )
+
+
+def _dispatch_quantize_mlx(_args: argparse.Namespace) -> int:
+    print("quantize-mlx is not yet implemented.")
+    return 1
+
+
+def _add_common_args(parser: argparse.ArgumentParser) -> None:
+    _ = parser.add_argument(
+        "config",
+        nargs="?",
+        default="config.yml",
+        type=Path,
+        help="path to config YAML file (default: ./config.yml)",
+    )
+    _ = parser.add_argument(
+        "-v", "--verbose", action="store_true", help="show verbose output"
+    )
+    group = parser.add_mutually_exclusive_group()
+    _ = group.add_argument(
+        "--use-existing",
+        action="store_true",
+        help="use existing outputs without prompting",
+    )
+    _ = group.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="overwrite existing outputs without prompting",
+    )
+    _ = group.add_argument(
+        "--cancel",
+        action="store_true",
+        help="cancel immediately if outputs already exist",
+    )
+
+
+SUBCOMMANDS = ("run", "extract-params", "quantize-gguf", "quantize-mlx")
 
 
 def _is_run_fallback(argv: list[str]) -> bool:
     if not argv:
         return False
-    if argv[0] in ("run", "params", "-h", "--help"):
+    if argv[0] in (*SUBCOMMANDS, "-h", "--help"):
         return False
-    # Treat as implicit "run"
     return True
 
 
@@ -54,64 +123,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="gguf-clone")
     subparsers = parser.add_subparsers(dest="command")
 
-    # -- run subcommand --
     run_parser = subparsers.add_parser(
-        "run",
-        help="run the full clone pipeline from a config file",
+        "run", help="run declared pipeline stages in order"
     )
-    _ = run_parser.add_argument(
-        "config",
-        nargs="?",
-        default="config.yml",
-        type=Path,
-        help="path to config YAML file (default: ./config.yml)",
-    )
-    _ = run_parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="show verbose output",
-    )
-    overwrite_group = run_parser.add_mutually_exclusive_group()
-    _ = overwrite_group.add_argument(
-        "--use-existing",
-        action="store_true",
-        help="use existing outputs without prompting",
-    )
-    _ = overwrite_group.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="overwrite existing outputs without prompting",
-    )
-    _ = overwrite_group.add_argument(
-        "--cancel",
-        action="store_true",
-        help="cancel immediately if outputs already exist",
-    )
+    _add_common_args(run_parser)
 
-    # -- params subcommand --
-    params_parser = subparsers.add_parser(
-        "params",
-        help="extract quantization parameters from template GGUF(s)",
+    ep_parser = subparsers.add_parser(
+        "extract-params", help="extract quantization parameters from template GGUFs"
     )
-    _ = params_parser.add_argument(
-        "directory",
-        type=Path,
-        help="directory containing template GGUF file(s)",
+    _add_common_args(ep_parser)
+
+    qg_parser = subparsers.add_parser(
+        "quantize-gguf", help="quantize target model to GGUF using extracted params"
     )
-    _ = params_parser.add_argument(
-        "patterns",
-        nargs="*",
-        default=["*.gguf"],
-        help="glob pattern(s) to match GGUF files (default: *.gguf)",
+    _add_common_args(qg_parser)
+
+    qm_parser = subparsers.add_parser(
+        "quantize-mlx", help="quantize target model to MLX using extracted params"
     )
-    _ = params_parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        default=None,
-        help="write JSON to file instead of stdout",
-    )
+    _add_common_args(qm_parser)
 
     argv = sys.argv[1:]
     if _is_run_fallback(argv):
@@ -120,10 +150,16 @@ def main() -> None:
     args = parser.parse_args(argv)
     command = cast(str | None, args.command)
 
-    if command == "run":
-        sys.exit(_dispatch_run(args))
-    elif command == "params":
-        sys.exit(_dispatch_params(args))
+    dispatch = {
+        "run": _dispatch_run,
+        "extract-params": _dispatch_extract_params,
+        "quantize-gguf": _dispatch_quantize_gguf,
+        "quantize-mlx": _dispatch_quantize_mlx,
+    }
+
+    handler = dispatch.get(command or "")
+    if handler:
+        sys.exit(handler(args))
     else:
         parser.print_help()
         sys.exit(1)

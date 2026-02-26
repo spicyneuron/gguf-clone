@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -26,12 +26,18 @@ class ParamsPayload:
     tensor_types: list[str]
     default_type: str
     imatrix: str
+    template_metadata: dict[str, str] = field(default_factory=dict)
+    staged_files: list[str] = field(default_factory=list)
+    template_gguf: str | None = None
 
 
 class ParamsPayloadData(TypedDict):
     tensor_types: list[str]
     default_type: str
     imatrix: str
+    template_metadata: dict[str, str]
+    staged_files: list[str]
+    template_gguf: str | None
 
 
 def ignore_tensor(tensor: ReaderTensor) -> bool:
@@ -139,6 +145,9 @@ def save_params_payload(payload: ParamsPayload, output_path: Path) -> None:
         "imatrix": payload.imatrix,
         "tensor_types": payload.tensor_types,
         "default_type": payload.default_type,
+        "template_metadata": payload.template_metadata,
+        "staged_files": payload.staged_files,
+        "template_gguf": payload.template_gguf,
     }
     _ = output_path.write_text(json.dumps(payload_dict, indent=2))
 
@@ -180,10 +189,40 @@ def _parse_params_payload(data: object) -> ParamsPayloadData | None:
         print("Params file is missing a valid 'imatrix' path.")
         return None
 
+    template_metadata_raw = root.get("template_metadata", {})
+    if not isinstance(template_metadata_raw, dict):
+        print("Params file is missing a valid 'template_metadata' dict.")
+        return None
+    template_metadata: dict[str, str] = {}
+    for key, value in cast(dict[object, object], template_metadata_raw).items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            print("Params file is missing a valid 'template_metadata' dict.")
+            return None
+        template_metadata[key] = value
+
+    staged_files_raw = root.get("staged_files", [])
+    if not isinstance(staged_files_raw, list):
+        print("Params file is missing a valid 'staged_files' list.")
+        return None
+    staged_files: list[str] = []
+    for item in cast(list[object], staged_files_raw):
+        if not isinstance(item, str):
+            print("Params file is missing a valid 'staged_files' list.")
+            return None
+        staged_files.append(item)
+
+    template_gguf = root.get("template_gguf", None)
+    if template_gguf is not None and not isinstance(template_gguf, str):
+        print("Params file is missing a valid 'template_gguf' value.")
+        return None
+
     return {
         "tensor_types": tensor_types,
         "default_type": default_type,
         "imatrix": imatrix,
+        "template_metadata": template_metadata,
+        "staged_files": staged_files,
+        "template_gguf": template_gguf,
     }
 
 
@@ -202,6 +241,9 @@ def load_params(path: Path) -> ParamsPayload | None:
         tensor_types=parsed["tensor_types"],
         default_type=parsed["default_type"],
         imatrix=parsed["imatrix"],
+        template_metadata=parsed["template_metadata"],
+        staged_files=parsed["staged_files"],
+        template_gguf=parsed["template_gguf"],
     )
 
 

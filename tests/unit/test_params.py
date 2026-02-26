@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gguf_clone.main import quant_label_from_stem
-from gguf_clone.params import build_params, copy_imatrix
+from gguf_clone.artifacts import quant_label_from_stem
+from gguf_clone.params import ParamsPayload, build_params, copy_imatrix, load_params, save_params_payload
 
 
 @pytest.mark.parametrize(
@@ -250,3 +250,20 @@ def test_copy_imatrix_overwrites_different_file(tmp_path: Path) -> None:
 
     assert result == "params/imatrix.dat"
     assert dest_file.read_bytes() == b"new content"
+
+
+def test_params_payload_round_trip_with_staged_fields(tmp_path: Path) -> None:
+    payload = ParamsPayload(
+        tensor_types=["blk\\.(\\d+)\\.attn_q\\.weight=Q4_K"],
+        default_type="Q4_K",
+        imatrix="params/imatrix.dat",
+        template_metadata={"tokenizer.chat_template": "{{ chat }}"},
+        staged_files=["mmproj.bin"],
+        template_gguf="model-Q4_K.gguf",
+    )
+    path = tmp_path / "params.json"
+    save_params_payload(payload, path)
+
+    loaded = load_params(path)
+    assert loaded is not None
+    assert loaded == payload

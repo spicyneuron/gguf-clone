@@ -1,343 +1,619 @@
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
 from pathlib import Path
 from unittest.mock import patch
 
-from gguf_clone.main import RunConfig, run
-from gguf_clone.params import ParamsPayload, QuantParams
-from gguf_clone.resolve import ResolvedModels, ToolPaths
+from gguf_clone.artifacts import Artifacts
+from gguf_clone.config import RunConfig as V2RunConfig, SourceRef
+from gguf_clone.main import run, run_extract_params, run_pipeline, run_quantize_gguf
+from gguf_clone.params import ParamsPayload, QuantParams, load_params
+from gguf_clone.resolve import ToolPaths
 
 
-def _make_config(*, split: str = "50G") -> RunConfig:
-    return RunConfig(
-        template_repo="org/template",
-        template_path=None,
-        template_gguf_patterns=["*.gguf"],
-        template_imatrix_pattern="*imatrix*",
-        template_copy_metadata=[],
-        template_copy_files=[],
-        target_repo="org/target",
-        target_path=None,
-        target_exclude_files=[],
-        output_prefix="",
-        output_split=split,
-        output_converted_dir="converted",
-        output_params_dir="params",
-        output_quantized_dir="quantized",
-        output_apply_metadata={},
+def _v2_config(
+    tmp_path: Path,
+    *,
+    extract_params: object = None,
+    quantize_gguf: object = None,
+) -> V2RunConfig:
+    from gguf_clone.config import ExtractParamsConfig, QuantizeGgufConfig
+
+    ep = None
+    if extract_params is not None:
+        ep = ExtractParamsConfig.model_validate(extract_params)
+    qg = None
+    if quantize_gguf is not None:
+        qg = QuantizeGgufConfig.model_validate(quantize_gguf)
+    return V2RunConfig(
+        template=SourceRef(repo="org/template", path=None),
+        target=SourceRef(repo="org/target", path=None),
+        output_dir=tmp_path / "output",
+        extract_params=ep,
+        quantize_gguf=qg,
+        quantize_mlx=None,
     )
 
 
-def _make_resolved(tmp_path: Path) -> ResolvedModels:
-    template_snapshot = tmp_path / "template"
-    template_snapshot.mkdir()
-    template_gguf = template_snapshot / "template-Q4_K.gguf"
-    _ = template_gguf.write_bytes(b"template")
-    template_imatrix = template_snapshot / "imatrix.dat"
-    _ = template_imatrix.write_bytes(b"imatrix")
-    target_snapshot = tmp_path / "target"
-    target_snapshot.mkdir()
-    return ResolvedModels(
-        template_snapshot=template_snapshot,
-        template_imatrix=template_imatrix,
-        template_ggufs=[[template_gguf]],
-        target_snapshot=target_snapshot,
+def _v2_artifacts(tmp_path: Path) -> Artifacts:
+    return Artifacts(
+        output_dir=tmp_path / "output",
+        template_slug="org-template",
+        target_slug="org-target",
     )
 
 
-def _make_tools() -> ToolPaths:
+def _tool_paths() -> ToolPaths:
     return ToolPaths(
         llama_quantize=Path("/bin/llama-quantize"),
         llama_gguf_split=Path("/bin/llama-gguf-split"),
-        convert_hf_to_gguf=Path("/bin/convert_hf_to_gguf.py"),
+        convert_hf_to_gguf=Path("/bin/convert.py"),
     )
 
 
-def _fake_convert(
-    _model_path: Path,
-    *,
-    output_dir: Path,
-    outfile_name: str | None,
-    **_kwargs: object,
-) -> int:
-    assert outfile_name is not None
-    _ = (output_dir / outfile_name).write_bytes(b"converted")
-    return 0
+def test_run_extract_params_writes_gguf_json(tmp_path: Path) -> None:
+    config = _v2_config(
+        tmp_path,
+        extract_params={"ggufs": ["*Q4_K*.gguf"], "targets": ["gguf"]},
+    )
+    arts = _v2_artifacts(tmp_path)
 
+    template_snapshot = tmp_path / "template_snap"
+    template_snapshot.mkdir()
+    _ = (template_snapshot / "model-Q4_K.gguf").write_bytes(b"gguf")
 
-def _fake_quantize(
-    _input_path: Path,
-    output_path: Path,
-    *,
-    tensor_types: list[str],
-    default_type: str,
-    imatrix: str,
-    llama_quantize: Path,
-    cwd: Path | None = None,
-    indent: str = "",
-) -> int:
-    del tensor_types, default_type, imatrix, llama_quantize, cwd, indent
-    _ = output_path.write_bytes(b"q")
-    return 0
+    fake_params = QuantParams(
+        tensor_types=["blk\\.(\\d+)\\.attn_q\\.weight=Q4_K"],
+        default_type="Q4_K",
+        quant_type_counts={"Q4_K": 10},
+    )
 
-
-def _patch_base(
-    config: RunConfig,
-    resolved: ResolvedModels,
-    tools: ToolPaths,
-) -> list[AbstractContextManager[object]]:
-    return [
+    with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.main.load_config", return_value=config),
-        patch("gguf_clone.main.resolve_tools", return_value=tools),
-        patch("gguf_clone.main.resolve_models", return_value=resolved),
-        patch("gguf_clone.main.convert_target", side_effect=_fake_convert),
-    ]
-
-
-def test_run_use_existing_params_skips_preconfirm_work(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yml"
-    _ = config_path.write_text("stub")
-    config = _make_config()
-    resolved = _make_resolved(tmp_path)
-    tools = _make_tools()
-    params_path = tmp_path / "params" / "org-template-Q4_K.json"
-    params_path.parent.mkdir(parents=True, exist_ok=True)
-    _ = params_path.write_text("{}")
-    _ = (tmp_path / "params" / "imatrix.dat").write_bytes(b"imatrix")
-    payload = ParamsPayload(
-        tensor_types=["tensor.weight=Q4_K"],
-        default_type="Q4_K",
-        imatrix="params/imatrix.dat",
-    )
-
-    patches = _patch_base(config, resolved, tools)
-    with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        patch("gguf_clone.main.load_params", return_value=payload),
-        patch("gguf_clone.main.quantize_gguf", side_effect=_fake_quantize),
-        patch("gguf_clone.main.copy_imatrix") as copy_mock,
-        patch("gguf_clone.main.build_params_payload") as build_mock,
+        patch("gguf_clone.main.resolve_source_snapshot", return_value=template_snapshot),
+        patch("gguf_clone.main.build_params", return_value=fake_params),
     ):
-        result = run(config_path, overwrite_behavior="use")
+        result = run_extract_params(config, arts, overwrite_behavior="overwrite")
 
     assert result == 0
-    copy_mock.assert_not_called()
-    build_mock.assert_not_called()
+    assert arts.params_gguf("Q4_K").exists()
 
 
-def test_run_use_existing_params_copies_missing_imatrix(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yml"
-    _ = config_path.write_text("stub")
-    config = _make_config()
-    resolved = _make_resolved(tmp_path)
-    tools = _make_tools()
-    params_path = tmp_path / "params" / "org-template-Q4_K.json"
-    params_path.parent.mkdir(parents=True, exist_ok=True)
-    _ = params_path.write_text("{}")
-    payload = ParamsPayload(
-        tensor_types=["tensor.weight=Q4_K"],
+def test_run_extract_params_stages_template_artifacts(tmp_path: Path) -> None:
+    config = _v2_config(
+        tmp_path,
+        extract_params={"ggufs": ["*Q4_K*.gguf"], "targets": ["gguf"]},
+        quantize_gguf={
+            "imatrix": "*imatrix*",
+            "copy_metadata": ["tokenizer.chat_template"],
+            "copy_files": ["*mmproj*"],
+            "apply_metadata": {},
+        },
+    )
+    arts = _v2_artifacts(tmp_path)
+
+    template_snapshot = tmp_path / "template_snap"
+    template_snapshot.mkdir()
+    _ = (template_snapshot / "model-Q4_K.gguf").write_bytes(b"gguf")
+    _ = (template_snapshot / "imatrix.dat").write_bytes(b"imatrix")
+    _ = (template_snapshot / "mmproj.bin").write_bytes(b"mmproj")
+
+    fake_params = QuantParams(
+        tensor_types=["blk\\.(\\d+)\\.attn_q\\.weight=Q4_K"],
         default_type="Q4_K",
-        imatrix="params/imatrix.dat",
+        quant_type_counts={"Q4_K": 10},
     )
 
-    seen_imatrix: list[str] = []
-
-    def fake_quantize(
-        _input_path: Path,
-        output_path: Path,
-        *,
-        tensor_types: list[str],
-        default_type: str,
-        imatrix: str,
-        llama_quantize: Path,
-        cwd: Path | None = None,
-        indent: str = "",
-    ) -> int:
-        del tensor_types, default_type, llama_quantize, cwd, indent
-        seen_imatrix.append(imatrix)
-        _ = output_path.write_bytes(b"q")
-        return 0
-
-    patches = _patch_base(config, resolved, tools)
     with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        patch("gguf_clone.main.load_params", return_value=payload),
-        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
-        patch("gguf_clone.main.copy_imatrix", return_value="params/imatrix.dat") as copy_mock,
-        patch("gguf_clone.main.build_params_payload") as build_mock,
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
+        patch("gguf_clone.main.resolve_source_snapshot", return_value=template_snapshot),
+        patch("gguf_clone.main.build_params", return_value=fake_params),
+        patch(
+            "gguf_clone.main.extract_template_metadata",
+            return_value={"tokenizer.chat_template": "{{ chat }}"},
+        ),
     ):
-        result = run(config_path, overwrite_behavior="use")
+        result = run_extract_params(config, arts, overwrite_behavior="overwrite")
 
     assert result == 0
-    copy_mock.assert_called_once_with(
-        resolved.template_imatrix,
-        tmp_path / "params",
-        prefix="params",
-    )
-    build_mock.assert_not_called()
-    assert seen_imatrix == ["params/imatrix.dat"]
+    payload = load_params(arts.params_gguf("Q4_K"))
+    assert payload is not None
+    assert payload.imatrix == "params/imatrix.dat"
+    assert payload.template_metadata == {"tokenizer.chat_template": "{{ chat }}"}
+    assert payload.staged_files == ["mmproj.bin"]
+    assert payload.template_gguf == "model-Q4_K.gguf"
+    assert (arts.template_files_dir / "mmproj.bin").exists()
 
 
-def test_run_overwrite_params_confirms_before_copy_and_build(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yml"
-    _ = config_path.write_text("stub")
-    config = _make_config()
-    resolved = _make_resolved(tmp_path)
-    tools = _make_tools()
-    params_path = tmp_path / "params" / "org-template-Q4_K.json"
-    params_path.parent.mkdir(parents=True, exist_ok=True)
-    _ = params_path.write_text("{}")
+def test_run_extract_params_missing_section(tmp_path: Path) -> None:
+    config = _v2_config(tmp_path)
+    arts = _v2_artifacts(tmp_path)
 
-    events: list[str] = []
-
-    def fake_confirm(paths: list[Path], label: str, *, indent: str = "") -> str:
-        del paths, indent
-        events.append(f"confirm:{label}")
-        return "overwrite"
-
-    def fake_copy(src: Path, dest_dir: Path, prefix: str = "") -> str:
-        del src, dest_dir, prefix
-        events.append("copy")
-        return "params/imatrix.dat"
-
-    def fake_build(paths: Path | list[Path], imatrix: str) -> tuple[ParamsPayload, QuantParams]:
-        del paths
-        events.append("build")
-        payload = ParamsPayload(
-            tensor_types=["tensor.weight=Q4_K"],
-            default_type="Q4_K",
-            imatrix=imatrix,
-        )
-        params = QuantParams(
-            tensor_types=payload.tensor_types,
-            default_type=payload.default_type,
-            quant_type_counts={"Q4_K": 1},
-        )
-        return payload, params
-
-    def fake_save(payload: ParamsPayload, output_path: Path) -> None:
-        del payload
-        events.append("save")
-        _ = output_path.write_text("{}")
-
-    def fake_quantize(
-        _input_path: Path,
-        output_path: Path,
-        *,
-        tensor_types: list[str],
-        default_type: str,
-        imatrix: str,
-        llama_quantize: Path,
-        cwd: Path | None = None,
-        indent: str = "",
-    ) -> int:
-        del tensor_types, default_type, imatrix, llama_quantize, cwd, indent
-        events.append("quantize")
-        _ = output_path.write_bytes(b"q")
-        return 0
-
-    patches = _patch_base(config, resolved, tools)
     with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        patch("gguf_clone.main.confirm_overwrite", side_effect=fake_confirm),
-        patch("gguf_clone.main.copy_imatrix", side_effect=fake_copy),
-        patch("gguf_clone.main.build_params_payload", side_effect=fake_build),
-        patch("gguf_clone.main.save_params_payload", side_effect=fake_save),
-        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
     ):
-        result = run(config_path)
-
-    assert result == 0
-    assert events.index("confirm:params") < events.index("copy")
-    assert events.index("copy") < events.index("build")
-    assert events.index("build") < events.index("save")
-
-
-def test_run_removes_existing_splits_before_quantize(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yml"
-    _ = config_path.write_text("stub")
-    config = _make_config()
-    resolved = _make_resolved(tmp_path)
-    tools = _make_tools()
-
-    split_dir = tmp_path / "quantized" / "Q4_K"
-    split_dir.mkdir(parents=True, exist_ok=True)
-    split_file = split_dir / "org-target-Q4_K-00001-of-00002.gguf"
-    _ = split_file.write_bytes(b"old-split")
-
-    payload = ParamsPayload(
-        tensor_types=["tensor.weight=Q4_K"],
-        default_type="Q4_K",
-        imatrix="params/imatrix.dat",
-    )
-
-    events: list[str] = []
-    removed: list[list[Path]] = []
-
-    def fake_confirm(paths: list[Path], label: str, *, indent: str = "") -> str:
-        del paths, indent
-        events.append(f"confirm:{label}")
-        if label == "params":
-            return "use"
-        return "overwrite"
-
-    def fake_remove(paths: list[Path]) -> bool:
-        removed.append(list(paths))
-        events.append("remove")
-        for path in paths:
-            if path.exists():
-                path.unlink()
-        return True
-
-    def fake_quantize_fail(
-        _input_path: Path,
-        output_path: Path,
-        *,
-        tensor_types: list[str],
-        default_type: str,
-        imatrix: str,
-        llama_quantize: Path,
-        cwd: Path | None = None,
-        indent: str = "",
-    ) -> int:
-        del output_path, tensor_types, default_type, imatrix, llama_quantize, cwd, indent
-        events.append("quantize")
-        return 1
-
-    patches = _patch_base(config, resolved, tools)
-    with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        patch("gguf_clone.main.confirm_overwrite", side_effect=fake_confirm),
-        patch("gguf_clone.main.load_params", return_value=payload),
-        patch("gguf_clone.main.remove_files", side_effect=fake_remove),
-        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize_fail),
-    ):
-        result = run(config_path)
+        result = run_extract_params(config, arts)
 
     assert result == 1
-    assert not split_file.exists()
-    assert any(split_file in batch for batch in removed)
-    assert events.index("remove") < events.index("quantize")
+
+
+def test_run_quantize_gguf_with_target_convert(tmp_path: Path) -> None:
+    config = _v2_config(
+        tmp_path,
+        quantize_gguf={
+            "target_convert": True,
+            "imatrix": None,
+            "copy_metadata": [],
+            "copy_files": [],
+            "apply_metadata": {},
+        },
+    )
+    arts = _v2_artifacts(tmp_path)
+    arts.mkdir_all()
+
+    payload = ParamsPayload(
+        tensor_types=["tensor.weight=Q4_K"],
+        default_type="Q4_K",
+        imatrix="",
+    )
+    from gguf_clone.params import save_params_payload
+
+    save_params_payload(payload, arts.params_gguf("Q4_K"))
+
+    target_snapshot = tmp_path / "target_snap"
+    target_snapshot.mkdir()
+
+    def fake_convert(
+        _model_path: Path,
+        *,
+        output_dir: Path,
+        outfile_name: str | None,
+        **_kwargs: object,
+    ) -> int:
+        assert outfile_name is not None
+        _ = (output_dir / outfile_name).write_bytes(b"converted")
+        return 0
+
+    def fake_quantize(
+        _input: Path,
+        output_path: Path,
+        **_kwargs: object,
+    ) -> int:
+        _ = output_path.write_bytes(b"quantized")
+        return 0
+
+    calls: list[str] = []
+
+    def tracking_resolve(ref: SourceRef, **_kw: object) -> Path:
+        if ref.repo == "org/target":
+            calls.append("resolve_target")
+            return target_snapshot
+        raise AssertionError("Template resolution should not be needed here")
+
+    with (
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
+        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.main.resolve_source_snapshot", side_effect=tracking_resolve),
+        patch("gguf_clone.main.convert_target", side_effect=fake_convert),
+        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
+    ):
+        result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
+
+    assert result == 0
+    assert calls == ["resolve_target"]
+    assert arts.quantized_gguf("Q4_K").exists()
+
+
+def test_run_quantize_gguf_missing_section(tmp_path: Path) -> None:
+    config = _v2_config(tmp_path)
+    arts = _v2_artifacts(tmp_path)
+
+    with (
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
+    ):
+        result = run_quantize_gguf(config, arts)
+
+    assert result == 1
+
+
+def test_run_quantize_gguf_explicit_target_gguf(tmp_path: Path) -> None:
+    target_gguf = tmp_path / "my-model.gguf"
+    _ = target_gguf.write_bytes(b"existing-gguf")
+
+    config = _v2_config(
+        tmp_path,
+        quantize_gguf={
+            "target_gguf": str(target_gguf),
+            "target_convert": False,
+            "imatrix": None,
+            "copy_metadata": [],
+            "copy_files": [],
+            "apply_metadata": {},
+        },
+    )
+    arts = _v2_artifacts(tmp_path)
+    arts.mkdir_all()
+
+    payload = ParamsPayload(
+        tensor_types=["tensor.weight=Q4_K"],
+        default_type="Q4_K",
+        imatrix="",
+    )
+    from gguf_clone.params import save_params_payload
+
+    save_params_payload(payload, arts.params_gguf("Q4_K"))
+
+    quantized_input: list[Path] = []
+
+    def fake_quantize(
+        input_path: Path,
+        output_path: Path,
+        **_kwargs: object,
+    ) -> int:
+        quantized_input.append(input_path)
+        _ = output_path.write_bytes(b"quantized")
+        return 0
+
+    with (
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
+        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.main.resolve_source_snapshot") as resolve_mock,
+        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
+    ):
+        result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
+
+    assert result == 0
+    resolve_mock.assert_not_called()
+    assert quantized_input == [target_gguf]
+    assert arts.quantized_gguf("Q4_K").exists()
+
+
+def test_run_quantize_gguf_no_params_files(tmp_path: Path) -> None:
+    config = _v2_config(
+        tmp_path,
+        quantize_gguf={
+            "target_convert": True,
+            "imatrix": None,
+            "copy_metadata": [],
+            "copy_files": [],
+            "apply_metadata": {},
+        },
+    )
+    arts = _v2_artifacts(tmp_path)
+    arts.mkdir_all()
+
+    target_snapshot = tmp_path / "target_snap"
+    target_snapshot.mkdir()
+
+    def fake_convert(
+        _model_path: Path,
+        *,
+        output_dir: Path,
+        outfile_name: str | None,
+        **_kwargs: object,
+    ) -> int:
+        assert outfile_name is not None
+        _ = (output_dir / outfile_name).write_bytes(b"converted")
+        return 0
+
+    with (
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
+        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.main.resolve_source_snapshot", return_value=target_snapshot),
+        patch("gguf_clone.main.convert_target", side_effect=fake_convert),
+    ):
+        result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
+
+    assert result == 1
+
+
+def test_run_quantize_gguf_requires_extracted_metadata(tmp_path: Path) -> None:
+    config = _v2_config(
+        tmp_path,
+        quantize_gguf={
+            "target_convert": True,
+            "imatrix": None,
+            "copy_metadata": ["tokenizer.chat_template"],
+            "copy_files": [],
+            "apply_metadata": {},
+        },
+    )
+    arts = _v2_artifacts(tmp_path)
+    arts.mkdir_all()
+
+    payload = ParamsPayload(
+        tensor_types=["tensor.weight=Q4_K"],
+        default_type="Q4_K",
+        imatrix="",
+    )
+    from gguf_clone.params import save_params_payload
+
+    save_params_payload(payload, arts.params_gguf("Q4_K"))
+
+    target_snapshot = tmp_path / "target_snap"
+    target_snapshot.mkdir()
+
+    def fake_convert(
+        _model_path: Path,
+        *,
+        output_dir: Path,
+        outfile_name: str | None,
+        **_kwargs: object,
+    ) -> int:
+        assert outfile_name is not None
+        _ = (output_dir / outfile_name).write_bytes(b"converted")
+        return 0
+
+    with (
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
+        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.main.resolve_source_snapshot", return_value=target_snapshot),
+        patch("gguf_clone.main.convert_target", side_effect=fake_convert),
+        patch("gguf_clone.main.quantize_gguf") as quantize_mock,
+    ):
+        result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
+
+    assert result == 1
+    quantize_mock.assert_not_called()
+
+
+def test_run_quantize_gguf_applies_extracted_metadata(tmp_path: Path) -> None:
+    target_gguf = tmp_path / "target.gguf"
+    _ = target_gguf.write_bytes(b"target")
+
+    config = _v2_config(
+        tmp_path,
+        quantize_gguf={
+            "target_gguf": str(target_gguf),
+            "target_convert": False,
+            "imatrix": None,
+            "copy_metadata": ["tokenizer.chat_template"],
+            "copy_files": [],
+            "apply_metadata": {"general.quantized_by": "tester"},
+        },
+    )
+    arts = _v2_artifacts(tmp_path)
+    arts.mkdir_all()
+
+    payload = ParamsPayload(
+        tensor_types=["tensor.weight=Q4_K"],
+        default_type="Q4_K",
+        imatrix="",
+        template_metadata={"tokenizer.chat_template": "{{ chat }}"},
+    )
+    from gguf_clone.params import save_params_payload
+
+    save_params_payload(payload, arts.params_gguf("Q4_K"))
+
+    def fake_quantize(
+        _input: Path,
+        output_path: Path,
+        **_kwargs: object,
+    ) -> int:
+        _ = output_path.write_bytes(b"quantized")
+        return 0
+
+    with (
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
+        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
+        patch("gguf_clone.main.apply_metadata", return_value=0) as apply_mock,
+    ):
+        result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
+
+    assert result == 0
+    assert apply_mock.call_count == 2
+    assert apply_mock.call_args_list[0].args[1] == {
+        "tokenizer.chat_template": "{{ chat }}",
+    }
+    assert apply_mock.call_args_list[1].args[1] == {
+        "general.quantized_by": "tester",
+    }
+
+
+def test_run_quantize_gguf_copies_staged_files(tmp_path: Path) -> None:
+    target_gguf = tmp_path / "target.gguf"
+    _ = target_gguf.write_bytes(b"target")
+
+    config = _v2_config(
+        tmp_path,
+        quantize_gguf={
+            "target_gguf": str(target_gguf),
+            "target_convert": False,
+            "imatrix": None,
+            "copy_metadata": [],
+            "copy_files": ["*mmproj*"],
+            "apply_metadata": {},
+        },
+    )
+    arts = _v2_artifacts(tmp_path)
+    arts.mkdir_all()
+
+    _ = (arts.template_files_dir / "mmproj.bin").write_bytes(b"staged")
+
+    payload = ParamsPayload(
+        tensor_types=["tensor.weight=Q4_K"],
+        default_type="Q4_K",
+        imatrix="",
+        staged_files=["mmproj.bin"],
+    )
+    from gguf_clone.params import save_params_payload
+
+    save_params_payload(payload, arts.params_gguf("Q4_K"))
+
+    def fake_quantize(
+        _input: Path,
+        output_path: Path,
+        **_kwargs: object,
+    ) -> int:
+        _ = output_path.write_bytes(b"quantized")
+        return 0
+
+    with (
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
+        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
+    ):
+        result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
+
+    assert result == 0
+    assert (arts.quantized_gguf_dir / "mmproj.bin").exists()
+
+
+def test_run_pipeline_missing_config_file(tmp_path: Path) -> None:
+    result = run_pipeline(tmp_path / "does-not-exist.yml")
+    assert result == 1
+
+
+def test_run_pipeline_executes_stages_in_order(tmp_path: Path) -> None:
+    import yaml
+
+    config_data: dict[str, object] = {
+        "version": 2,
+        "source": {
+            "template": "org/template",
+            "target": "org/target",
+        },
+        "output_dir": "output",
+        "extract_params": {
+            "ggufs": ["*.gguf"],
+        },
+        "quantize_gguf": {
+            "imatrix": None,
+            "copy_metadata": [],
+            "copy_files": [],
+            "apply_metadata": {},
+        },
+    }
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    calls: list[str] = []
+
+    def fake_extract(config: V2RunConfig, arts: Artifacts, **_kw: object) -> int:
+        del config, arts
+        calls.append("extract_params")
+        return 0
+
+    def fake_quantize(config: V2RunConfig, arts: Artifacts, **_kw: object) -> int:
+        del config, arts
+        calls.append("quantize_gguf")
+        return 0
+
+    with (
+        patch("gguf_clone.main.run_extract_params", side_effect=fake_extract),
+        patch("gguf_clone.main.run_quantize_gguf", side_effect=fake_quantize),
+    ):
+        result = run_pipeline(config_file)
+
+    assert result == 0
+    assert calls == ["extract_params", "quantize_gguf"]
+
+
+def test_run_pipeline_skips_absent_stages(tmp_path: Path) -> None:
+    import yaml
+
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "org/template",
+            "target": "org/target",
+        },
+        "extract_params": {
+            "ggufs": ["*.gguf"],
+        },
+    }
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    calls: list[str] = []
+
+    def fake_extract(config: V2RunConfig, arts: Artifacts, **_kw: object) -> int:
+        del config, arts
+        calls.append("extract_params")
+        return 0
+
+    with (
+        patch("gguf_clone.main.run_extract_params", side_effect=fake_extract),
+        patch("gguf_clone.main.run_quantize_gguf") as qg_mock,
+    ):
+        result = run_pipeline(config_file)
+
+    assert result == 0
+    assert calls == ["extract_params"]
+    qg_mock.assert_not_called()
+
+
+def test_run_pipeline_no_stages_errors(tmp_path: Path) -> None:
+    import yaml
+
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "org/template",
+            "target": "org/target",
+        },
+    }
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    result = run_pipeline(config_file)
+    assert result == 1
+
+
+def test_run_pipeline_stops_on_stage_failure(tmp_path: Path) -> None:
+    import yaml
+
+    config_data: dict[str, object] = {
+        "version": 2,
+        "source": {
+            "template": "org/template",
+            "target": "org/target",
+        },
+        "extract_params": {
+            "ggufs": ["*.gguf"],
+        },
+        "quantize_gguf": {
+            "imatrix": None,
+            "apply_metadata": {},
+        },
+    }
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    def fake_extract_fail(config: V2RunConfig, arts: Artifacts, **_kw: object) -> int:
+        del config, arts
+        return 1
+
+    with (
+        patch("gguf_clone.main.run_extract_params", side_effect=fake_extract_fail),
+        patch("gguf_clone.main.run_quantize_gguf") as qg_mock,
+    ):
+        result = run_pipeline(config_file)
+
+    assert result == 1
+    qg_mock.assert_not_called()
+
+
+def test_run_alias_delegates_to_pipeline(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yml"
+    _ = config_path.write_text("version: 2\nsource:\n  template: org/template\n  target: org/target\n")
+
+    with patch("gguf_clone.main.run_pipeline", return_value=0) as pipeline_mock:
+        result = run(config_path, verbose=True, overwrite_behavior="overwrite")
+
+    assert result == 0
+    pipeline_mock.assert_called_once_with(
+        config_path,
+        verbose=True,
+        overwrite_behavior="overwrite",
+    )

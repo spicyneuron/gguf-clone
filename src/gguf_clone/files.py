@@ -7,7 +7,7 @@ from .common import confirm_overwrite, log_line, log_success
 from .resolve import filter_paths
 
 
-def _match_copy_files(
+def match_copy_files(
     template_snapshot: Path, patterns: list[str]
 ) -> list[Path] | None:
     if not patterns:
@@ -25,31 +25,7 @@ def _match_copy_files(
     return list(dict.fromkeys(matches))
 
 
-def copy_template_files(
-    template_snapshot: Path,
-    patterns: list[str],
-    output_dir: Path,
-    *,
-    indent: str = "",
-) -> int:
-    matches = _match_copy_files(template_snapshot, patterns)
-    if matches is None:
-        return 1
-    if not matches:
-        return 0
-
-    outputs: dict[Path, Path] = {}
-    for source in matches:
-        dest = output_dir / source.name
-        if dest in outputs:
-            print(
-                "Template copy_files patterns matched multiple files with the same name:"
-            )
-            print(f"  {outputs[dest]}")
-            print(f"  {source}")
-            return 1
-        outputs[dest] = source
-
+def _copy_outputs(outputs: dict[Path, Path], *, output_dir: Path, indent: str) -> int:
     log_line(
         f"Copying {len(outputs)} template file(s) to {output_dir}",
         indent=indent,
@@ -69,3 +45,58 @@ def copy_template_files(
         indent=indent,
     )
     return 0
+
+
+def copy_template_files(
+    template_snapshot: Path,
+    patterns: list[str],
+    output_dir: Path,
+    *,
+    indent: str = "",
+) -> int:
+    matches = match_copy_files(template_snapshot, patterns)
+    if matches is None:
+        return 1
+    if not matches:
+        return 0
+
+    outputs: dict[Path, Path] = {}
+    for source in matches:
+        dest = output_dir / source.name
+        if dest in outputs:
+            print(
+                "Template copy_files patterns matched multiple files with the same name:"
+            )
+            print(f"  {outputs[dest]}")
+            print(f"  {source}")
+            return 1
+        outputs[dest] = source
+
+    return _copy_outputs(outputs, output_dir=output_dir, indent=indent)
+
+def copy_staged_files(
+    staged_dir: Path,
+    names: list[str],
+    output_dir: Path,
+    *,
+    indent: str = "",
+) -> int:
+    if not names:
+        return 0
+
+    outputs: dict[Path, Path] = {}
+    missing_sources: list[Path] = []
+    for name in names:
+        source = staged_dir / name
+        if not source.is_file():
+            missing_sources.append(source)
+            continue
+        outputs[output_dir / name] = source
+
+    if missing_sources:
+        print("Staged template files missing:")
+        for path in missing_sources:
+            print(f"  {path}")
+        return 1
+
+    return _copy_outputs(outputs, output_dir=output_dir, indent=indent)

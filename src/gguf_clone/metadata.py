@@ -16,6 +16,61 @@ class MetadataValue:
     sub_type: GGUFValueType | None
 
 
+def _normalize_metadata_keys(keys: list[str]) -> tuple[list[str], list[str]]:
+    filtered: list[str] = []
+    skipped: list[str] = []
+    for key in dict.fromkeys(keys):
+        if key == Keys.General.ARCHITECTURE or key.startswith("GGUF."):
+            skipped.append(key)
+            continue
+        filtered.append(key)
+    return filtered, skipped
+
+
+def extract_template_metadata(
+    template_path: Path,
+    keys: list[str],
+    *,
+    indent: str = "",
+) -> dict[str, str] | None:
+    extract_keys, skipped = _normalize_metadata_keys(keys)
+    if skipped:
+        log_line(f"Skipping managed metadata keys: {', '.join(skipped)}", indent=indent)
+    if not extract_keys:
+        return {}
+
+    log_line(f"Extracting metadata: {', '.join(extract_keys)}", indent=indent)
+    reader = GGUFReader(str(template_path), "r")
+    values: dict[str, str] = {}
+    missing: list[str] = []
+    non_string: list[str] = []
+
+    for key in extract_keys:
+        field = reader.get_field(key)
+        if field is None:
+            missing.append(key)
+            continue
+        field_value = cast(object, field.contents())
+        if not isinstance(field_value, str):
+            non_string.append(key)
+            continue
+        values[key] = field_value
+
+    if missing:
+        print("Template GGUF missing metadata keys:")
+        for key in missing:
+            print(f"  {key}")
+        return None
+
+    if non_string:
+        print("Template GGUF metadata keys must be strings for extracted params:")
+        for key in non_string:
+            print(f"  {key}")
+        return None
+
+    return values
+
+
 def copy_template_metadata(
     template_path: Path,
     target_path: Path,
@@ -26,13 +81,7 @@ def copy_template_metadata(
     if not keys:
         return 0
 
-    copy_keys: list[str] = []
-    skipped: list[str] = []
-    for key in dict.fromkeys(keys):
-        if key == Keys.General.ARCHITECTURE or key.startswith("GGUF."):
-            skipped.append(key)
-            continue
-        copy_keys.append(key)
+    copy_keys, skipped = _normalize_metadata_keys(keys)
 
     if skipped:
         log_line(f"Skipping managed metadata keys: {', '.join(skipped)}", indent=indent)
@@ -143,13 +192,7 @@ def apply_metadata(
     if not metadata:
         return 0
 
-    apply_keys: list[str] = []
-    skipped: list[str] = []
-    for key in dict.fromkeys(metadata.keys()):
-        if key == Keys.General.ARCHITECTURE or key.startswith("GGUF."):
-            skipped.append(key)
-            continue
-        apply_keys.append(key)
+    apply_keys, skipped = _normalize_metadata_keys(list(metadata.keys()))
 
     if skipped:
         log_line(f"Skipping managed metadata keys: {', '.join(skipped)}", indent=indent)

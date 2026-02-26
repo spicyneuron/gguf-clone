@@ -3,32 +3,36 @@ from pathlib import Path
 import yaml
 from pytest import CaptureFixture
 
-from gguf_clone.main import RunConfig, load_config
+from gguf_clone.config import RunConfig, load_config
 
 
-def test_load_config_valid(tmp_path: Path) -> None:
+def test_load_full_config(tmp_path: Path) -> None:
     config_data = {
-        "template": {
-            "repo": "unsloth/Qwen3-0.6B-GGUF",
+        "version": 2,
+        "source": {
+            "template": "unsloth/Qwen3-0.6B-GGUF",
+            "target": "Qwen/Qwen3-0.6B",
+        },
+        "output_dir": "output",
+        "extract_params": {
+            "ggufs": ["*UD-IQ1_M*.gguf", "*UD-Q2_K_XL*.gguf"],
+            "targets": ["gguf", "mlx"],
+            "mlx_arch": "auto",
+        },
+        "quantize_gguf": {
+            "target_gguf": None,
+            "target_convert": True,
             "imatrix": "*imatrix*",
-            "ggufs": ["*UD-IQ1_M.gguf"],
+            "output_max_size": "50G",
             "copy_metadata": ["tokenizer.chat_template"],
             "copy_files": ["*mmproj*"],
-        },
-        "target": {
-            "repo": "unsloth/Qwen3-0.6B",
-            "exclude_files": ["*.md", "*.txt"],
-        },
-        "output": {
-            "prefix": "test_prefix",
-            "split": "25G",
-            "converted_dir": "custom_converted",
-            "params_dir": "custom_params",
-            "quantized_dir": "custom_quantized",
             "apply_metadata": {
                 "general.quantized_by": "test-user",
-                "general.custom_field": "custom-value",
             },
+        },
+        "quantize_mlx": {
+            "group_size": 128,
+            "trust_remote_code": True,
         },
     }
 
@@ -39,31 +43,44 @@ def test_load_config_valid(tmp_path: Path) -> None:
 
     assert config is not None
     assert isinstance(config, RunConfig)
-    assert config.template_repo == "unsloth/Qwen3-0.6B-GGUF"
-    assert config.template_path is None
-    assert config.template_imatrix_pattern == "*imatrix*"
-    assert config.template_gguf_patterns == ["*UD-IQ1_M.gguf"]
-    assert config.template_copy_metadata == ["tokenizer.chat_template"]
-    assert config.template_copy_files == ["*mmproj*"]
-    assert config.target_repo == "unsloth/Qwen3-0.6B"
-    assert config.target_path is None
-    assert config.target_exclude_files == ["*.md", "*.txt"]
-    assert config.output_prefix == "test_prefix"
-    assert config.output_split == "25G"
-    assert config.output_converted_dir == "custom_converted"
-    assert config.output_params_dir == "custom_params"
-    assert config.output_quantized_dir == "custom_quantized"
-    assert config.output_apply_metadata == {
+    # Source resolves as HF repos (paths don't exist locally)
+    assert config.template.repo == "unsloth/Qwen3-0.6B-GGUF"
+    assert config.template.path is None
+    assert config.target.repo == "Qwen/Qwen3-0.6B"
+    assert config.target.path is None
+    assert config.output_dir == tmp_path / "output"
+
+    # extract_params
+    assert config.extract_params is not None
+    assert config.extract_params.ggufs == ["*UD-IQ1_M*.gguf", "*UD-Q2_K_XL*.gguf"]
+    assert config.extract_params.targets == ["gguf", "mlx"]
+    assert config.extract_params.mlx_arch == "auto"
+
+    # quantize_gguf
+    assert config.quantize_gguf is not None
+    assert config.quantize_gguf.target_gguf is None
+    assert config.quantize_gguf.target_convert is True
+    assert config.quantize_gguf.imatrix == "*imatrix*"
+    assert config.quantize_gguf.output_max_size == "50G"
+    assert config.quantize_gguf.copy_metadata == ["tokenizer.chat_template"]
+    assert config.quantize_gguf.copy_files == ["*mmproj*"]
+    assert config.quantize_gguf.apply_metadata == {
         "general.quantized_by": "test-user",
-        "general.custom_field": "custom-value",
     }
 
+    # quantize_mlx
+    assert config.quantize_mlx is not None
+    assert config.quantize_mlx.group_size == 128
+    assert config.quantize_mlx.trust_remote_code is True
 
-def test_load_config_defaults(tmp_path: Path) -> None:
-    # Test default output prefix, split, directories, and string ggufs
+
+def test_omitted_stages_are_none(tmp_path: Path) -> None:
     config_data = {
-        "template": {"repo": "repo", "imatrix": "imatrix", "ggufs": "*gguf"},
-        "target": {"repo": "target"},
+        "version": 2,
+        "source": {
+            "template": "unsloth/Qwen3-0.6B-GGUF",
+            "target": "Qwen/Qwen3-0.6B",
+        },
     }
 
     config_file = tmp_path / "config.yml"
@@ -72,77 +89,81 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     config = load_config(config_file)
 
     assert config is not None
-    assert config.output_prefix == ""
-    assert config.output_split == "50G"
-    assert config.output_converted_dir == "converted"
-    assert config.output_params_dir == "params"
-    assert config.output_quantized_dir == "quantized"
-    assert config.output_apply_metadata == {
+    assert config.extract_params is None
+    assert config.quantize_gguf is None
+    assert config.quantize_mlx is None
+
+
+def test_single_stage_only(tmp_path: Path) -> None:
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "unsloth/Qwen3-0.6B-GGUF",
+            "target": "Qwen/Qwen3-0.6B",
+        },
+        "extract_params": {
+            "ggufs": "*UD-IQ1_M*.gguf",
+        },
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.extract_params is not None
+    assert config.extract_params.ggufs == ["*UD-IQ1_M*.gguf"]
+    assert config.extract_params.targets == ["gguf"]
+    assert config.quantize_gguf is None
+    assert config.quantize_mlx is None
+
+
+def test_defaults(tmp_path: Path) -> None:
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "unsloth/Qwen3-0.6B-GGUF",
+            "target": "Qwen/Qwen3-0.6B",
+        },
+        "quantize_gguf": {
+            "imatrix": "*imatrix*",
+        },
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.output_dir == tmp_path / "output"
+
+    qg = config.quantize_gguf
+    assert qg is not None
+    assert qg.target_gguf is None
+    assert qg.target_convert is True
+    assert qg.output_max_size == "50G"
+    assert qg.copy_metadata == []
+    assert qg.copy_files == []
+    assert qg.apply_metadata == {
         "general.quantized_by": "https://github.com/spicyneuron/gguf-clone"
     }
-    assert config.template_gguf_patterns == ["*gguf"]
-    assert config.template_copy_metadata == []
-    assert config.template_copy_files == []
-    assert config.template_path is None
-    assert config.target_path is None
-    assert config.target_exclude_files == []
 
 
-def test_load_config_missing_keys(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
-    config_data = {
-        "template": {
-            "repo": "repo"
-            # Missing ggufs, imatrix
-        },
-        "target": {"repo": "target"},
-    }
-
-    config_file = tmp_path / "config.yml"
-    _ = config_file.write_text(yaml.dump(config_data))
-
-    config = load_config(config_file)
-
-    assert config is None
-    captured = capsys.readouterr()
-    assert "ggufs" in captured.out
-    assert "Field required" in captured.out
-
-
-def test_load_config_invalid_types(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
-    config_data = {
-        "template": {
-            "repo": 123,  # Invalid type
-            "imatrix": "imatrix",
-            "ggufs": ["*gguf"],
-        },
-        "target": {"repo": "target"},
-    }
-
-    config_file = tmp_path / "config.yml"
-    _ = config_file.write_text(yaml.dump(config_data))
-
-    config = load_config(config_file)
-
-    assert config is None
-    captured = capsys.readouterr()
-    assert "template.repo" in captured.out or "repo" in captured.out
-    assert "str" in captured.out.lower()
-
-
-def test_load_config_path_sources(tmp_path: Path) -> None:
+def test_local_path_source(tmp_path: Path) -> None:
     template_dir = tmp_path / "models" / "template"
     target_dir = tmp_path / "models" / "target"
     template_dir.mkdir(parents=True)
     target_dir.mkdir(parents=True)
+    # Template dir must contain at least one .gguf file
+    _ = (template_dir / "model.gguf").write_bytes(b"")
 
     config_data = {
-        "template": {
-            "path": "models/template",
-            "imatrix": "imatrix.dat",
-            "ggufs": "*gguf",
-        },
-        "target": {
-            "path": "models/target",
+        "version": 2,
+        "source": {
+            "template": "models/template",
+            "target": "models/target",
         },
     }
 
@@ -152,23 +173,36 @@ def test_load_config_path_sources(tmp_path: Path) -> None:
     config = load_config(config_file)
 
     assert config is not None
-    assert config.template_repo is None
-    assert config.target_repo is None
-    assert config.template_path == template_dir
-    assert config.target_path == target_dir
+    assert config.template.repo is None
+    assert config.template.path == template_dir
+    assert config.target.repo is None
+    assert config.target.path == target_dir
 
 
-def test_load_config_rejects_both_repo_and_path(
-    tmp_path: Path, capsys: CaptureFixture[str]
-) -> None:
+def test_nonexistent_path_falls_back_to_repo(tmp_path: Path) -> None:
     config_data = {
-        "template": {
-            "repo": "repo",
-            "path": "./template",
-            "imatrix": "imatrix",
-            "ggufs": "*gguf",
+        "version": 2,
+        "source": {
+            "template": "org/some-model",
+            "target": "org/other-model",
         },
-        "target": {"repo": "target"},
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.template.repo == "org/some-model"
+    assert config.template.path is None
+    assert config.target.repo == "org/other-model"
+    assert config.target.path is None
+
+
+def test_missing_source(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    config_data = {
+        "version": 2,
     }
 
     config_file = tmp_path / "config.yml"
@@ -178,18 +212,20 @@ def test_load_config_rejects_both_repo_and_path(
 
     assert config is None
     captured = capsys.readouterr()
-    assert "exactly one of 'repo' or 'path'" in captured.out
+    assert "source" in captured.out
 
 
-def test_load_config_rejects_missing_repo_and_path(
-    tmp_path: Path, capsys: CaptureFixture[str]
-) -> None:
+def test_missing_config_file(capsys: CaptureFixture[str]) -> None:
+    config = load_config(Path("/does-not-exist/config.yml"))
+    assert config is None
+    captured = capsys.readouterr()
+    assert "Config file not found" in captured.out
+
+
+def test_missing_source_template(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
     config_data = {
-        "template": {
-            "imatrix": "imatrix",
-            "ggufs": "*gguf",
-        },
-        "target": {"repo": "target"},
+        "version": 2,
+        "source": {"target": "Qwen/Qwen3-0.6B"},
     }
 
     config_file = tmp_path / "config.yml"
@@ -199,16 +235,38 @@ def test_load_config_rejects_missing_repo_and_path(
 
     assert config is None
     captured = capsys.readouterr()
-    assert "exactly one of 'repo' or 'path'" in captured.out
+    assert "template" in captured.out
 
 
-def test_load_config_partial_directory_overrides(tmp_path: Path) -> None:
-    # Test that partial directory overrides work with defaults
+def test_unsupported_version(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
     config_data = {
-        "template": {"repo": "repo", "imatrix": "imatrix", "ggufs": "*gguf"},
-        "target": {"repo": "target"},
-        "output": {
-            "quantized_dir": "my_outputs",
+        "version": 1,
+        "source": {
+            "template": "org/model",
+            "target": "org/target",
+        },
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is None
+    captured = capsys.readouterr()
+    assert "Unsupported config version" in captured.out
+
+
+def test_extract_params_string_ggufs(tmp_path: Path) -> None:
+    """Single string ggufs should be coerced to a list."""
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "org/model",
+            "target": "org/target",
+        },
+        "extract_params": {
+            "ggufs": "*Q4_K*.gguf",
         },
     }
 
@@ -218,21 +276,20 @@ def test_load_config_partial_directory_overrides(tmp_path: Path) -> None:
     config = load_config(config_file)
 
     assert config is not None
-    assert config.output_converted_dir == "converted"  # Default
-    assert config.output_params_dir == "params"  # Default
-    assert config.output_quantized_dir == "my_outputs"  # Override
+    assert config.extract_params is not None
+    assert config.extract_params.ggufs == ["*Q4_K*.gguf"]
 
 
-def test_load_config_override_apply_metadata(tmp_path: Path) -> None:
-    # Test that users can override the default apply_metadata
+def test_quantize_gguf_no_imatrix(tmp_path: Path) -> None:
+    """Setting imatrix to null should skip imatrix."""
     config_data = {
-        "template": {"repo": "repo", "imatrix": "imatrix", "ggufs": "*gguf"},
-        "target": {"repo": "target"},
-        "output": {
-            "apply_metadata": {
-                "general.quantized_by": "custom-user",
-                "general.custom_field": "custom-value",
-            },
+        "version": 2,
+        "source": {
+            "template": "org/model",
+            "target": "org/target",
+        },
+        "quantize_gguf": {
+            "imatrix": None,
         },
     }
 
@@ -242,33 +299,18 @@ def test_load_config_override_apply_metadata(tmp_path: Path) -> None:
     config = load_config(config_file)
 
     assert config is not None
-    assert config.output_apply_metadata == {
-        "general.quantized_by": "custom-user",
-        "general.custom_field": "custom-value",
-    }
+    assert config.quantize_gguf is not None
+    assert config.quantize_gguf.imatrix is None
 
 
-def test_load_config_exclude_files_string(tmp_path: Path) -> None:
-    config_data = {
-        "template": {"repo": "repo", "imatrix": "imatrix", "ggufs": "*gguf"},
-        "target": {"repo": "target", "exclude_files": "*.bin"},
-    }
-
-    config_file = tmp_path / "config.yml"
-    _ = config_file.write_text(yaml.dump(config_data))
-
-    config = load_config(config_file)
-
-    assert config is not None
-    assert config.target_exclude_files == ["*.bin"]
-
-
-def test_load_config_clear_apply_metadata(tmp_path: Path) -> None:
-    # Test that users can clear apply_metadata by setting it to empty dict
+def test_quantize_gguf_clear_apply_metadata(tmp_path: Path) -> None:
     config_data: dict[str, object] = {
-        "template": {"repo": "repo", "imatrix": "imatrix", "ggufs": "*gguf"},
-        "target": {"repo": "target"},
-        "output": {
+        "version": 2,
+        "source": {
+            "template": "org/model",
+            "target": "org/target",
+        },
+        "quantize_gguf": {
             "apply_metadata": {},
         },
     }
@@ -279,4 +321,94 @@ def test_load_config_clear_apply_metadata(tmp_path: Path) -> None:
     config = load_config(config_file)
 
     assert config is not None
-    assert config.output_apply_metadata == {}
+    assert config.quantize_gguf is not None
+    assert config.quantize_gguf.apply_metadata == {}
+
+
+def test_quantize_mlx_defaults(tmp_path: Path) -> None:
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "org/model",
+            "target": "org/target",
+        },
+        "quantize_mlx": {},
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.quantize_mlx is not None
+    assert config.quantize_mlx.group_size == 64
+    assert config.quantize_mlx.trust_remote_code is False
+
+
+def test_output_dir_relative_to_config(tmp_path: Path) -> None:
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "org/model",
+            "target": "org/target",
+        },
+        "output_dir": "my_output",
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.output_dir == tmp_path / "my_output"
+
+
+def test_local_template_dir_must_contain_ggufs(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    empty_dir = tmp_path / "empty_template"
+    empty_dir.mkdir()
+
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "empty_template",
+            "target": "org/target",
+        },
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is None
+    captured = capsys.readouterr()
+    assert "no .gguf files" in captured.out.lower()
+
+
+def test_source_file_not_treated_as_local(tmp_path: Path) -> None:
+    """A file (not a directory) should fall back to HF repo."""
+    _ = (tmp_path / "not-a-dir").write_bytes(b"")
+
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "not-a-dir",
+            "target": "not-a-dir",
+        },
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    # Both should fall back to HF repo since they're files, not dirs
+    assert config.template.repo == "not-a-dir"
+    assert config.template.path is None
+    assert config.target.repo == "not-a-dir"
+    assert config.target.path is None
