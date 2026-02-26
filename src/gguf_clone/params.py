@@ -127,19 +127,6 @@ def build_params(paths: Path | list[Path]) -> QuantParams:
     )
 
 
-def build_params_payload(
-    template_paths: Path | list[Path],
-    imatrix: str,
-) -> tuple[ParamsPayload, QuantParams]:
-    params = build_params(template_paths)
-    payload = ParamsPayload(
-        tensor_types=params.tensor_types,
-        default_type=params.default_type,
-        imatrix=imatrix,
-    )
-    return payload, params
-
-
 def save_params_payload(payload: ParamsPayload, output_path: Path) -> None:
     payload_dict = {
         "imatrix": payload.imatrix,
@@ -245,44 +232,3 @@ def load_params(path: Path) -> ParamsPayload | None:
         staged_files=parsed["staged_files"],
         template_gguf=parsed["template_gguf"],
     )
-
-
-def extract_params(
-    directory: Path,
-    patterns: list[str],
-    output: Path | None = None,
-) -> int:
-    from .resolve import match_pattern
-
-    if not directory.is_dir():
-        print(f"Not a directory: {directory}")
-        return 1
-
-    candidates = sorted(p for p in directory.rglob("*.gguf") if p.is_file())
-    if not candidates:
-        print(f"No .gguf files found in {directory}")
-        return 1
-
-    all_paths: list[Path] = []
-    for pattern in patterns:
-        matched = match_pattern(directory, candidates, pattern, "GGUF")
-        if not matched:
-            return 1
-        all_paths.extend(matched)
-
-    params = build_params(all_paths)
-
-    if output is not None:
-        payload = ParamsPayload(
-            tensor_types=params.tensor_types,
-            default_type=params.default_type,
-            imatrix="",
-        )
-        save_params_payload(payload, output)
-    else:
-        result = {
-            "tensor_types": params.tensor_types,
-            "default_type": params.default_type,
-        }
-        print(json.dumps(result, indent=2))
-    return 0

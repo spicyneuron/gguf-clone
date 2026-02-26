@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from gguf_clone.artifacts import Artifacts
 from gguf_clone.config import RunConfig as V2RunConfig, SourceRef
-from gguf_clone.main import run, run_extract_params, run_pipeline, run_quantize_gguf
+from gguf_clone.main import run_extract_params, run_pipeline, run_quantize_gguf
 from gguf_clone.params import ParamsPayload, QuantParams, load_params
 from gguf_clone.resolve import ToolPaths
 
@@ -70,8 +70,8 @@ def test_run_extract_params_writes_gguf_json(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.main.resolve_source_snapshot", return_value=template_snapshot),
-        patch("gguf_clone.main.build_params", return_value=fake_params),
+        patch("gguf_clone.stages.extract_params.resolve_source_snapshot", return_value=template_snapshot),
+        patch("gguf_clone.stages.extract_params.build_params", return_value=fake_params),
     ):
         result = run_extract_params(config, arts, overwrite_behavior="overwrite")
 
@@ -107,10 +107,10 @@ def test_run_extract_params_stages_template_artifacts(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.main.resolve_source_snapshot", return_value=template_snapshot),
-        patch("gguf_clone.main.build_params", return_value=fake_params),
+        patch("gguf_clone.stages.extract_params.resolve_source_snapshot", return_value=template_snapshot),
+        patch("gguf_clone.stages.extract_params.build_params", return_value=fake_params),
         patch(
-            "gguf_clone.main.extract_template_metadata",
+            "gguf_clone.stages.extract_params.extract_template_metadata",
             return_value={"tokenizer.chat_template": "{{ chat }}"},
         ),
     ):
@@ -195,10 +195,10 @@ def test_run_quantize_gguf_with_target_convert(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
-        patch("gguf_clone.main.resolve_source_snapshot", side_effect=tracking_resolve),
-        patch("gguf_clone.main.convert_target", side_effect=fake_convert),
-        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
+        patch("gguf_clone.stages.quantize_gguf.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.stages.quantize_gguf.resolve_source_snapshot", side_effect=tracking_resolve),
+        patch("gguf_clone.stages.quantize_gguf.convert_target", side_effect=fake_convert),
+        patch("gguf_clone.stages.quantize_gguf.quantize_gguf", side_effect=fake_quantize),
     ):
         result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
 
@@ -261,9 +261,9 @@ def test_run_quantize_gguf_explicit_target_gguf(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
-        patch("gguf_clone.main.resolve_source_snapshot") as resolve_mock,
-        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
+        patch("gguf_clone.stages.quantize_gguf.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.stages.quantize_gguf.resolve_source_snapshot") as resolve_mock,
+        patch("gguf_clone.stages.quantize_gguf.quantize_gguf", side_effect=fake_quantize),
     ):
         result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
 
@@ -304,9 +304,9 @@ def test_run_quantize_gguf_no_params_files(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
-        patch("gguf_clone.main.resolve_source_snapshot", return_value=target_snapshot),
-        patch("gguf_clone.main.convert_target", side_effect=fake_convert),
+        patch("gguf_clone.stages.quantize_gguf.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.stages.quantize_gguf.resolve_source_snapshot", return_value=target_snapshot),
+        patch("gguf_clone.stages.quantize_gguf.convert_target", side_effect=fake_convert),
     ):
         result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
 
@@ -353,10 +353,10 @@ def test_run_quantize_gguf_requires_extracted_metadata(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
-        patch("gguf_clone.main.resolve_source_snapshot", return_value=target_snapshot),
-        patch("gguf_clone.main.convert_target", side_effect=fake_convert),
-        patch("gguf_clone.main.quantize_gguf") as quantize_mock,
+        patch("gguf_clone.stages.quantize_gguf.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.stages.quantize_gguf.resolve_source_snapshot", return_value=target_snapshot),
+        patch("gguf_clone.stages.quantize_gguf.convert_target", side_effect=fake_convert),
+        patch("gguf_clone.stages.quantize_gguf.quantize_gguf") as quantize_mock,
     ):
         result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
 
@@ -403,9 +403,9 @@ def test_run_quantize_gguf_applies_extracted_metadata(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
-        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
-        patch("gguf_clone.main.apply_metadata", return_value=0) as apply_mock,
+        patch("gguf_clone.stages.quantize_gguf.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.stages.quantize_gguf.quantize_gguf", side_effect=fake_quantize),
+        patch("gguf_clone.stages.quantize_gguf.apply_metadata", return_value=0) as apply_mock,
     ):
         result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
 
@@ -460,8 +460,8 @@ def test_run_quantize_gguf_copies_staged_files(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.main.resolve_tools", return_value=_tool_paths()),
-        patch("gguf_clone.main.quantize_gguf", side_effect=fake_quantize),
+        patch("gguf_clone.stages.quantize_gguf.resolve_tools", return_value=_tool_paths()),
+        patch("gguf_clone.stages.quantize_gguf.quantize_gguf", side_effect=fake_quantize),
     ):
         result = run_quantize_gguf(config, arts, overwrite_behavior="overwrite")
 
@@ -602,18 +602,3 @@ def test_run_pipeline_stops_on_stage_failure(tmp_path: Path) -> None:
 
     assert result == 1
     qg_mock.assert_not_called()
-
-
-def test_run_alias_delegates_to_pipeline(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yml"
-    _ = config_path.write_text("version: 2\nsource:\n  template: org/template\n  target: org/target\n")
-
-    with patch("gguf_clone.main.run_pipeline", return_value=0) as pipeline_mock:
-        result = run(config_path, verbose=True, overwrite_behavior="overwrite")
-
-    assert result == 0
-    pipeline_mock.assert_called_once_with(
-        config_path,
-        verbose=True,
-        overwrite_behavior="overwrite",
-    )

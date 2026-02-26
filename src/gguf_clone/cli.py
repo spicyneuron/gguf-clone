@@ -8,7 +8,7 @@ from typing import cast
 from . import config as config_mod
 from .artifacts import Artifacts
 from .common import OverwriteBehavior
-from .main import run_extract_params, run_pipeline, run_quantize_gguf
+from .main import run_extract_params, run_pipeline, run_quantize_gguf, run_quantize_mlx
 
 
 def _overwrite_from_args(args: argparse.Namespace) -> OverwriteBehavior | None:
@@ -74,9 +74,21 @@ def _dispatch_quantize_gguf(args: argparse.Namespace) -> int:
     )
 
 
-def _dispatch_quantize_mlx(_args: argparse.Namespace) -> int:
-    print("quantize-mlx is not yet implemented.")
-    return 1
+def _dispatch_quantize_mlx(args: argparse.Namespace) -> int:
+    config_path = cast(Path, args.config).expanduser()
+    loaded = _load_config_and_artifacts(config_path)
+    if not loaded:
+        return 1
+    config, artifacts = loaded
+    if config.quantize_mlx is None:
+        print("quantize_mlx section missing from config.")
+        return 1
+    return run_quantize_mlx(
+        config,
+        artifacts,
+        verbose=cast(bool, args.verbose),
+        overwrite_behavior=_overwrite_from_args(args),
+    )
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:

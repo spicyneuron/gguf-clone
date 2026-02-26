@@ -47,99 +47,83 @@ gguf-clone --overwrite
 gguf-clone --cancel
 ```
 
-Outputs are generated alongside the config file by default:
+Outputs are generated under `output_dir` (default: alongside config file in `./output`):
 
 - `converted/*.gguf` - Target model converted into a GGUF for llama.cpp
-- `params/*.json` - `llama-quantize` paramaters extracted from template GGUF(s)
-- `quantized/*.gguf` - Final quantized outputs
+- `params/*.json` - `llama-quantize` parameters extracted from template GGUF(s)
+- `template_files/*` - Optional staged files copied from the template source
+- `quantized/gguf/*.gguf` - Final quantized outputs (or split shards under per-quant folders)
 
 Output file names are keyed by source:
 
 - Hugging Face sources use the repo id (for example `unsloth-Qwen3-0.6B`)
 - Local `path` sources only the path leaf name (for example `/a/exp1/model` and `/b/exp2/model` both become `model`)
 
-## Configuration
+## Configuration (v2)
 
-Use either `repo` or `path` for each template and target (exactly one per section):
+The config format is versioned and only `version: 2` is supported.
 
-- `repo`: `ORG/MODEL` on Hugging Face
-- `path`: local directory (or `.gguf` file for target only)
+- `source.template`: template model source, either Hugging Face repo id (`org/model`) or local directory path
+- `source.target`: target model source, either Hugging Face repo id or local directory path
+- `output_dir`: output root directory (relative to config path by default)
 
-Template matching still uses `ggufs`, `imatrix`, and `copy_files` patterns.  
-`target.exclude_files` is only used for Hugging Face downloads.
+Stage sections are optional. `run` executes declared stages in order.
 
-Minimal example (only required fields):
+- `extract_params`: build quantization parameter files from template GGUFs
+- `quantize_gguf`: quantize target model using extracted params
+- `quantize_mlx`: reserved for MLX stage (not implemented yet)
+
+Minimal config:
 
 ```yaml
-template:
-  repo: unsloth/Qwen3-0.6B-GGUF
-  imatrix: "*imatrix*"
+version: 2
+
+source:
+  template: unsloth/Qwen3-0.6B-GGUF
+  target: Qwen/Qwen3-0.6B
+
+extract_params:
   ggufs: "*UD-IQ1_M*.gguf"
-  
-target:
-  repo: Qwen/Qwen3-0.6B
 ```
 
-Local-path example:
+Full v2 example:
 
 ```yaml
-template:
-  path: ./models/template
-  imatrix: "*imatrix*"
-  ggufs: "*UD-IQ1_M*.gguf"
-  
-target:
-  path: ./models/target
-```
+version: 2
 
-All options:
+source:
+  template: unsloth/Qwen3-0.6B-GGUF
+  target: Qwen/Qwen3-0.6B
 
-```yaml
-template:
-  # Exactly one of repo or path
-  repo: unsloth/Qwen3-0.6B-GGUF
-  # path: ./models/template
-  imatrix: "*imatrix*"
-  
-  # List multiple patterns to create multiple quantizations
+output_dir: output
+
+extract_params:
   ggufs:
     - "*UD-IQ1_M*.gguf"
     - "*UD-Q2_K_XL*.gguf"
-  
-  # Copy GGUF metadata (from the 1st shard if split)
+  targets:
+    - gguf
+    - mlx
+  mlx_arch: auto
+
+quantize_gguf:
+  # Use an existing converted GGUF instead of converting target source
+  target_gguf: null
+  # Convert target source with convert_hf_to_gguf.py when target_gguf is null
+  target_convert: true
+  # Set to null to disable imatrix usage
+  imatrix: "*imatrix*"
+  # Split output when exceeding this size
+  output_max_size: 50G
+  # Extract these string keys from template GGUF into params payload
   copy_metadata:
     - tokenizer.chat_template
-    
-  # Copy matched files
+  # Stage and copy these files into quantized output directory
   copy_files:
     - "*mmproj*"
-
-target:
-  # Exactly one of repo or path
-  repo: unsloth/Qwen3-0.6B
-  # path: ./models/target
-  # path: ./models/already-converted.gguf  # skips conversion step
-
-  # Skip downloading unnecessary files from the target repo (HF only)
-  exclude_files:
-    - "*.onnx"
-    - "GGUFs/*"
-
-output:
-  # Output model is named PREFIX-ORG-MODEL
-  prefix: not-unsloth
-  
-  # Add or edit GGUF metadata
+  # Additional metadata to apply to each quantized output
   apply_metadata:
     general.quantized_by: "https://github.com/spicyneuron/gguf-clone"
-
-  # Split output if greater than this size (unit can be M or G)
-  split: 50G
-
-  # Output directories (relative to config.yml location)
-  converted_dir: converted
-  params_dir: params
-  quantized_dir: quantized
 ```
 
 ## Environment Variables
