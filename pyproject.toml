@@ -31,6 +31,7 @@ dev = [
     "pytest>=8.4.2",
     "ruff>=0.14.11",
 ]
+mlx = ["mlx-lm>=0.22"]
 
 [project.scripts]
 gguf_clone = "gguf_clone.cli:main"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, cast
 
 import yaml
 from pydantic import BaseModel, BeforeValidator, ValidationError
@@ -22,8 +22,11 @@ class SourceConfig(BaseModel):
 
 class ExtractTemplateConfig(BaseModel):
     ggufs: StrList
-    targets: list[Literal["gguf", "mlx"]] = ["gguf"]
-    mlx_arch: str | None = None
+
+
+class ExtractTemplateMlxConfig(BaseModel):
+    package: str = "mlx-lm"
+    trust_remote_code: bool = False
 
 
 class QuantizeGgufConfig(BaseModel):
@@ -48,6 +51,7 @@ class ConfigFile(BaseModel):
     source: SourceConfig
     output_dir: str = "output"
     extract_template: ExtractTemplateConfig | None = None
+    extract_template_mlx: ExtractTemplateMlxConfig | None = None
     quantize_gguf: QuantizeGgufConfig | None = None
     quantize_mlx: QuantizeMlxConfig | None = None
 
@@ -66,6 +70,7 @@ class RunConfig:
     target: SourceRef
     output_dir: Path
     extract_template: ExtractTemplateConfig | None
+    extract_template_mlx: ExtractTemplateMlxConfig | None
     quantize_gguf: QuantizeGgufConfig | None
     quantize_mlx: QuantizeMlxConfig | None
 
@@ -136,6 +141,7 @@ def load_config(path: Path) -> RunConfig | None:
         target=_resolve_source(config.source.target, config_dir),
         output_dir=output_dir,
         extract_template=config.extract_template,
+        extract_template_mlx=config.extract_template_mlx,
         quantize_gguf=config.quantize_gguf,
         quantize_mlx=config.quantize_mlx,
     )

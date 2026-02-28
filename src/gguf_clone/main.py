@@ -7,7 +7,11 @@ from . import config as config_mod
 from .artifacts import Artifacts
 from .common import OverwriteBehavior, set_overwrite_behavior, set_verbose
 from .resolve import check_deps, check_gguf_support
-from .stages import run_extract_template_stage, run_quantize_gguf_stage
+from .stages import (
+    run_extract_template_mlx_stage,
+    run_extract_template_stage,
+    run_quantize_gguf_stage,
+)
 
 
 def _init_run(
@@ -41,6 +45,20 @@ def run_extract_template(
         print(err)
         return 1
     return run_extract_template_stage(config, artifacts)
+
+
+def run_extract_template_mlx(
+    config: config_mod.RunConfig,
+    artifacts: Artifacts,
+    *,
+    verbose: bool = False,
+    overwrite_behavior: OverwriteBehavior | None = None,
+) -> int:
+    err = _init_run(verbose=verbose, overwrite_behavior=overwrite_behavior)
+    if err:
+        print(err)
+        return 1
+    return run_extract_template_mlx_stage(config, artifacts)
 
 
 def run_quantize_gguf(
@@ -95,6 +113,7 @@ def run_pipeline(
 
     stages: list[tuple[object, Callable[..., int]]] = [
         (config.extract_template, run_extract_template),
+        (config.extract_template_mlx, run_extract_template_mlx),
         (config.quantize_gguf, run_quantize_gguf),
         (config.quantize_mlx, run_quantize_mlx),
     ]
@@ -114,7 +133,7 @@ def run_pipeline(
             return result
 
     if not ran_any:
-        print("No stages declared in config (extract_template, quantize_gguf, quantize_mlx).")
+        print("No stages declared in config.")
         return 1
 
     return 0

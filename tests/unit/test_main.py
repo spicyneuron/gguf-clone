@@ -5,7 +5,12 @@ from unittest.mock import patch
 
 from gguf_clone.artifacts import Artifacts
 from gguf_clone.config import RunConfig as V2RunConfig, SourceRef
-from gguf_clone.main import run_extract_template, run_pipeline, run_quantize_gguf
+from gguf_clone.main import (
+    run_extract_template,
+    run_extract_template_mlx,
+    run_pipeline,
+    run_quantize_gguf,
+)
 from gguf_clone.params import ParamsPayload, QuantParams, load_params
 from gguf_clone.resolve import ToolPaths
 
@@ -14,13 +19,21 @@ def _v2_config(
     tmp_path: Path,
     *,
     extract_template: object = None,
+    extract_template_mlx: object = None,
     quantize_gguf: object = None,
 ) -> V2RunConfig:
-    from gguf_clone.config import ExtractTemplateConfig, QuantizeGgufConfig
+    from gguf_clone.config import (
+        ExtractTemplateConfig,
+        ExtractTemplateMlxConfig,
+        QuantizeGgufConfig,
+    )
 
     ep = None
     if extract_template is not None:
         ep = ExtractTemplateConfig.model_validate(extract_template)
+    epm = None
+    if extract_template_mlx is not None:
+        epm = ExtractTemplateMlxConfig.model_validate(extract_template_mlx)
     qg = None
     if quantize_gguf is not None:
         qg = QuantizeGgufConfig.model_validate(quantize_gguf)
@@ -29,6 +42,7 @@ def _v2_config(
         target=SourceRef(repo="org/target", path=None),
         output_dir=tmp_path / "output",
         extract_template=ep,
+        extract_template_mlx=epm,
         quantize_gguf=qg,
         quantize_mlx=None,
     )
@@ -53,7 +67,7 @@ def _tool_paths() -> ToolPaths:
 def test_run_extract_template_writes_gguf_json(tmp_path: Path) -> None:
     config = _v2_config(
         tmp_path,
-        extract_template={"ggufs": ["*Q4_K*.gguf"], "targets": ["gguf"]},
+        extract_template={"ggufs": ["*Q4_K*.gguf"]},
     )
     arts = _v2_artifacts(tmp_path)
 
@@ -82,7 +96,7 @@ def test_run_extract_template_writes_gguf_json(tmp_path: Path) -> None:
 def test_run_extract_template_stages_template_artifacts(tmp_path: Path) -> None:
     config = _v2_config(
         tmp_path,
-        extract_template={"ggufs": ["*Q4_K*.gguf"], "targets": ["gguf"]},
+        extract_template={"ggufs": ["*Q4_K*.gguf"]},
         quantize_gguf={
             "imatrix": "*imatrix*",
             "copy_metadata": ["tokenizer.chat_template"],
@@ -137,6 +151,59 @@ def test_run_extract_template_missing_section(tmp_path: Path) -> None:
         result = run_extract_template(config, arts)
 
     assert result == 1
+
+
+def test_run_extract_template_mlx_missing_section(tmp_path: Path) -> None:
+    config = _v2_config(tmp_path)
+    arts = _v2_artifacts(tmp_path)
+
+    with (
+        patch("gguf_clone.main.check_deps", return_value=[]),
+        patch("gguf_clone.main.check_gguf_support", return_value=None),
+    ):
+        result = run_extract_template_mlx(config, arts)
+
+    assert result == 1
+
+
+def test_run_pipeline_includes_extract_template_mlx(tmp_path: Path) -> None:
+    import yaml
+
+    config_data: dict[str, object] = {
+        "version": 2,
+        "source": {
+            "template": "org/template",
+            "target": "org/target",
+        },
+        "output_dir": "output",
+        "extract_template": {
+            "ggufs": ["*.gguf"],
+        },
+        "extract_template_mlx": {},
+    }
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    calls: list[str] = []
+
+    def fake_extract(config: V2RunConfig, arts: Artifacts, **_kw: object) -> int:
+        del config, arts
+        calls.append("extract_template")
+        return 0
+
+    def fake_extract_mlx(config: V2RunConfig, arts: Artifacts, **_kw: object) -> int:
+        del config, arts
+        calls.append("extract_template_mlx")
+        return 0
+
+    with (
+        patch("gguf_clone.main.run_extract_template", side_effect=fake_extract),
+        patch("gguf_clone.main.run_extract_template_mlx", side_effect=fake_extract_mlx),
+    ):
+        result = run_pipeline(config_file)
+
+    assert result == 0
+    assert calls == ["extract_template", "extract_template_mlx"]
 
 
 def test_run_quantize_gguf_with_target_convert(tmp_path: Path) -> None:

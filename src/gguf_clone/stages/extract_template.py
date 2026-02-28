@@ -7,7 +7,6 @@ from ..artifacts import Artifacts, quant_label_from_stem
 from ..common import confirm_overwrite, log_stage, log_success, remove_files
 from ..files import copy_template_files, match_copy_files
 from ..metadata import extract_template_metadata
-from ..mlx_params import convert_gguf_params, resolve_arch, save_mlx_params
 from ..params import ParamsPayload, build_params, copy_imatrix, save_params_payload
 from ..resolve import ModelResolutionError, match_pattern, resolve_source_snapshot
 
@@ -143,46 +142,24 @@ def run_extract_template_stage(
                 return 1
             template_metadata = extracted
 
-        if "gguf" in ep.targets:
-            gguf_path = artifacts.params_gguf(quant_label)
-            action = confirm_overwrite([gguf_path], "params", indent="")
-            if action == "cancel":
+        gguf_path = artifacts.params_gguf(quant_label)
+        action = confirm_overwrite([gguf_path], "params", indent="")
+        if action == "cancel":
+            return 1
+        if action == "use":
+            log_success(f"Using existing params: {gguf_path}")
+        else:
+            if gguf_path.exists() and not remove_files([gguf_path]):
                 return 1
-            if action == "use":
-                log_success(f"Using existing params: {gguf_path}")
-            else:
-                if gguf_path.exists() and not remove_files([gguf_path]):
-                    return 1
-                payload = ParamsPayload(
-                    tensor_types=params.tensor_types,
-                    default_type=params.default_type,
-                    imatrix=imatrix_rel,
-                    template_metadata=template_metadata,
-                    staged_files=staged_file_names,
-                    template_gguf=template_gguf,
-                )
-                save_params_payload(payload, gguf_path)
-                log_success(f"Params saved to {gguf_path}")
-
-        if "mlx" in ep.targets:
-            mlx_path = artifacts.params_mlx(quant_label)
-            action = confirm_overwrite([mlx_path], "params", indent="")
-            if action == "cancel":
-                return 1
-            if action == "use":
-                log_success(f"Using existing params: {mlx_path}")
-            else:
-                if mlx_path.exists() and not remove_files([mlx_path]):
-                    return 1
-                arch = resolve_arch(ep.mlx_arch, template_group[0])
-                mlx_params = convert_gguf_params(
-                    params.tensor_types,
-                    params.default_type,
-                    arch=arch,
-                )
-                for warning in mlx_params.warnings:
-                    print(f"  [WARN] {warning}")
-                save_mlx_params(mlx_params, mlx_path)
-                log_success(f"MLX params saved to {mlx_path}")
+            payload = ParamsPayload(
+                tensor_types=params.tensor_types,
+                default_type=params.default_type,
+                imatrix=imatrix_rel,
+                template_metadata=template_metadata,
+                staged_files=staged_file_names,
+                template_gguf=template_gguf,
+            )
+            save_params_payload(payload, gguf_path)
+            log_success(f"Params saved to {gguf_path}")
 
     return 0

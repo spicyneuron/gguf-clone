@@ -8,7 +8,13 @@ from typing import cast
 from . import config as config_mod
 from .artifacts import Artifacts
 from .common import OverwriteBehavior
-from .main import run_extract_template, run_pipeline, run_quantize_gguf, run_quantize_mlx
+from .main import (
+    run_extract_template,
+    run_extract_template_mlx,
+    run_pipeline,
+    run_quantize_gguf,
+    run_quantize_mlx,
+)
 
 
 def _overwrite_from_args(args: argparse.Namespace) -> OverwriteBehavior | None:
@@ -50,6 +56,23 @@ def _dispatch_extract_template(args: argparse.Namespace) -> int:
         print("extract_template section missing from config.")
         return 1
     return run_extract_template(
+        config,
+        artifacts,
+        verbose=cast(bool, args.verbose),
+        overwrite_behavior=_overwrite_from_args(args),
+    )
+
+
+def _dispatch_extract_template_mlx(args: argparse.Namespace) -> int:
+    config_path = cast(Path, args.config).expanduser()
+    loaded = _load_config_and_artifacts(config_path)
+    if not loaded:
+        return 1
+    config, artifacts = loaded
+    if config.extract_template_mlx is None:
+        print("extract_template_mlx section missing from config.")
+        return 1
+    return run_extract_template_mlx(
         config,
         artifacts,
         verbose=cast(bool, args.verbose),
@@ -120,7 +143,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-SUBCOMMANDS = ("run", "extract-template", "quantize-gguf", "quantize-mlx")
+SUBCOMMANDS = (
+    "run",
+    "extract-template",
+    "extract-template-mlx",
+    "quantize-gguf",
+    "quantize-mlx",
+)
 
 
 def _is_run_fallback(argv: list[str]) -> bool:
@@ -145,6 +174,12 @@ def main() -> None:
     )
     _add_common_args(ep_parser)
 
+    epm_parser = subparsers.add_parser(
+        "extract-template-mlx",
+        help="translate GGUF params to MLX configs via model introspection",
+    )
+    _add_common_args(epm_parser)
+
     qg_parser = subparsers.add_parser(
         "quantize-gguf", help="quantize target model to GGUF using extracted params"
     )
@@ -165,6 +200,7 @@ def main() -> None:
     dispatch = {
         "run": _dispatch_run,
         "extract-template": _dispatch_extract_template,
+        "extract-template-mlx": _dispatch_extract_template_mlx,
         "quantize-gguf": _dispatch_quantize_gguf,
         "quantize-mlx": _dispatch_quantize_mlx,
     }

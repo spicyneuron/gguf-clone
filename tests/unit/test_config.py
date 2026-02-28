@@ -16,8 +16,9 @@ def test_load_full_config(tmp_path: Path) -> None:
         "output_dir": "output",
         "extract_template": {
             "ggufs": ["*UD-IQ1_M*.gguf", "*UD-Q2_K_XL*.gguf"],
-            "targets": ["gguf", "mlx"],
-            "mlx_arch": "auto",
+        },
+        "extract_template_mlx": {
+            "trust_remote_code": True,
         },
         "quantize_gguf": {
             "target_gguf": None,
@@ -53,8 +54,11 @@ def test_load_full_config(tmp_path: Path) -> None:
     # extract_template
     assert config.extract_template is not None
     assert config.extract_template.ggufs == ["*UD-IQ1_M*.gguf", "*UD-Q2_K_XL*.gguf"]
-    assert config.extract_template.targets == ["gguf", "mlx"]
-    assert config.extract_template.mlx_arch == "auto"
+
+    # extract_template_mlx
+    assert config.extract_template_mlx is not None
+    assert config.extract_template_mlx.trust_remote_code is True
+    assert config.extract_template_mlx.package == "mlx-lm"
 
     # quantize_gguf
     assert config.quantize_gguf is not None
@@ -90,6 +94,7 @@ def test_omitted_stages_are_none(tmp_path: Path) -> None:
 
     assert config is not None
     assert config.extract_template is None
+    assert config.extract_template_mlx is None
     assert config.quantize_gguf is None
     assert config.quantize_mlx is None
 
@@ -114,7 +119,6 @@ def test_single_stage_only(tmp_path: Path) -> None:
     assert config is not None
     assert config.extract_template is not None
     assert config.extract_template.ggufs == ["*UD-IQ1_M*.gguf"]
-    assert config.extract_template.targets == ["gguf"]
     assert config.quantize_gguf is None
     assert config.quantize_mlx is None
 
@@ -323,6 +327,27 @@ def test_quantize_gguf_clear_apply_metadata(tmp_path: Path) -> None:
     assert config is not None
     assert config.quantize_gguf is not None
     assert config.quantize_gguf.apply_metadata == {}
+
+
+def test_extract_template_mlx_defaults(tmp_path: Path) -> None:
+    config_data = {
+        "version": 2,
+        "source": {
+            "template": "org/model",
+            "target": "org/target",
+        },
+        "extract_template_mlx": {},
+    }
+
+    config_file = tmp_path / "config.yml"
+    _ = config_file.write_text(yaml.dump(config_data))
+
+    config = load_config(config_file)
+
+    assert config is not None
+    assert config.extract_template_mlx is not None
+    assert config.extract_template_mlx.package == "mlx-lm"
+    assert config.extract_template_mlx.trust_remote_code is False
 
 
 def test_quantize_mlx_defaults(tmp_path: Path) -> None:
