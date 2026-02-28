@@ -64,10 +64,10 @@ def test_integration_full_workflow() -> None:
 
     config = config_mod.load_config(config_path)
     assert config is not None, "Failed to load config"
-    assert config.extract_params is not None, "extract_params missing"
+    assert config.extract_template is not None, "extract_template missing"
     assert config.quantize_gguf is not None, "quantize_gguf missing"
 
-    ep = config.extract_params
+    ep = config.extract_template
     qg = config.quantize_gguf
 
     template_allow = list(ep.ggufs)

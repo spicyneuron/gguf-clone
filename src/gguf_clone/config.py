@@ -20,7 +20,7 @@ class SourceConfig(BaseModel):
     target: str
 
 
-class ExtractParamsConfig(BaseModel):
+class ExtractTemplateConfig(BaseModel):
     ggufs: StrList
     targets: list[Literal["gguf", "mlx"]] = ["gguf"]
     mlx_arch: str | None = None
@@ -47,7 +47,7 @@ class ConfigFile(BaseModel):
     version: int = 2
     source: SourceConfig
     output_dir: str = "output"
-    extract_params: ExtractParamsConfig | None = None
+    extract_template: ExtractTemplateConfig | None = None
     quantize_gguf: QuantizeGgufConfig | None = None
     quantize_mlx: QuantizeMlxConfig | None = None
 
@@ -65,7 +65,7 @@ class RunConfig:
     template: SourceRef
     target: SourceRef
     output_dir: Path
-    extract_params: ExtractParamsConfig | None
+    extract_template: ExtractTemplateConfig | None
     quantize_gguf: QuantizeGgufConfig | None
     quantize_mlx: QuantizeMlxConfig | None
 
@@ -135,7 +135,7 @@ def load_config(path: Path) -> RunConfig | None:
         template=template_result,
         target=_resolve_source(config.source.target, config_dir),
         output_dir=output_dir,
-        extract_params=config.extract_params,
+        extract_template=config.extract_template,
         quantize_gguf=config.quantize_gguf,
         quantize_mlx=config.quantize_mlx,
     )

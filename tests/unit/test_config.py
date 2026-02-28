@@ -14,7 +14,7 @@ def test_load_full_config(tmp_path: Path) -> None:
             "target": "Qwen/Qwen3-0.6B",
         },
         "output_dir": "output",
-        "extract_params": {
+        "extract_template": {
             "ggufs": ["*UD-IQ1_M*.gguf", "*UD-Q2_K_XL*.gguf"],
             "targets": ["gguf", "mlx"],
             "mlx_arch": "auto",
@@ -50,11 +50,11 @@ def test_load_full_config(tmp_path: Path) -> None:
     assert config.target.path is None
     assert config.output_dir == tmp_path / "output"
 
-    # extract_params
-    assert config.extract_params is not None
-    assert config.extract_params.ggufs == ["*UD-IQ1_M*.gguf", "*UD-Q2_K_XL*.gguf"]
-    assert config.extract_params.targets == ["gguf", "mlx"]
-    assert config.extract_params.mlx_arch == "auto"
+    # extract_template
+    assert config.extract_template is not None
+    assert config.extract_template.ggufs == ["*UD-IQ1_M*.gguf", "*UD-Q2_K_XL*.gguf"]
+    assert config.extract_template.targets == ["gguf", "mlx"]
+    assert config.extract_template.mlx_arch == "auto"
 
     # quantize_gguf
     assert config.quantize_gguf is not None
@@ -89,7 +89,7 @@ def test_omitted_stages_are_none(tmp_path: Path) -> None:
     config = load_config(config_file)
 
     assert config is not None
-    assert config.extract_params is None
+    assert config.extract_template is None
     assert config.quantize_gguf is None
     assert config.quantize_mlx is None
 
@@ -101,7 +101,7 @@ def test_single_stage_only(tmp_path: Path) -> None:
             "template": "unsloth/Qwen3-0.6B-GGUF",
             "target": "Qwen/Qwen3-0.6B",
         },
-        "extract_params": {
+        "extract_template": {
             "ggufs": "*UD-IQ1_M*.gguf",
         },
     }
@@ -112,9 +112,9 @@ def test_single_stage_only(tmp_path: Path) -> None:
     config = load_config(config_file)
 
     assert config is not None
-    assert config.extract_params is not None
-    assert config.extract_params.ggufs == ["*UD-IQ1_M*.gguf"]
-    assert config.extract_params.targets == ["gguf"]
+    assert config.extract_template is not None
+    assert config.extract_template.ggufs == ["*UD-IQ1_M*.gguf"]
+    assert config.extract_template.targets == ["gguf"]
     assert config.quantize_gguf is None
     assert config.quantize_mlx is None
 
@@ -257,7 +257,7 @@ def test_unsupported_version(tmp_path: Path, capsys: CaptureFixture[str]) -> Non
     assert "Unsupported config version" in captured.out
 
 
-def test_extract_params_string_ggufs(tmp_path: Path) -> None:
+def test_extract_template_string_ggufs(tmp_path: Path) -> None:
     """Single string ggufs should be coerced to a list."""
     config_data = {
         "version": 2,
@@ -265,7 +265,7 @@ def test_extract_params_string_ggufs(tmp_path: Path) -> None:
             "template": "org/model",
             "target": "org/target",
         },
-        "extract_params": {
+        "extract_template": {
             "ggufs": "*Q4_K*.gguf",
         },
     }
@@ -276,8 +276,8 @@ def test_extract_params_string_ggufs(tmp_path: Path) -> None:
     config = load_config(config_file)
 
     assert config is not None
-    assert config.extract_params is not None
-    assert config.extract_params.ggufs == ["*Q4_K*.gguf"]
+    assert config.extract_template is not None
+    assert config.extract_template.ggufs == ["*Q4_K*.gguf"]
 
 
 def test_quantize_gguf_no_imatrix(tmp_path: Path) -> None:

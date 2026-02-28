@@ -6,7 +6,7 @@ source:
 
 output_dir: test-output
 
-extract_params:
+extract_template:
   ggufs:
     - "*UD-IQ1_M.gguf"
     - "*UD-Q2_K_XL.gguf"

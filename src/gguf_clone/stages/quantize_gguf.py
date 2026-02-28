@@ -150,7 +150,7 @@ def run_quantize_gguf_stage(
             if not imatrix:
                 print(
                     f"Params file missing imatrix path: {params_path}. "
-                    + "Run extract-params to stage template artifacts."
+                    + "Run extract-template to stage template artifacts."
                 )
                 return 1
             if not _imatrix_exists(imatrix, work_dir=work_dir):
@@ -168,7 +168,7 @@ def run_quantize_gguf_stage(
                     + ", ".join(missing_metadata)
                 )
                 print(f"  {params_path}")
-                print("Run extract-params to stage template metadata.")
+                print("Run extract-template to stage template metadata.")
                 return 1
             extracted_metadata = {
                 key: loaded.template_metadata[key] for key in qg.copy_metadata
@@ -178,7 +178,7 @@ def run_quantize_gguf_stage(
             if not loaded.staged_files:
                 print(
                     f"Params file missing staged_files: {params_path}. "
-                    + "Run extract-params to stage template files."
+                    + "Run extract-template to stage template files."
                 )
                 return 1
             staged_files.update(loaded.staged_files)
@@ -293,7 +293,7 @@ def run_quantize_gguf_stage(
 
     if qg.copy_files:
         if not staged_files:
-            print("No staged template files found in params. Run extract-params first.")
+            print("No staged template files found in params. Run extract-template first.")
             return 1
         stage_indent = log_stage("Copying staged template files to quantized outputs")
         result = copy_staged_files(

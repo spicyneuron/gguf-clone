@@ -24,7 +24,7 @@ def _resolve_template_snapshot(
 
 
 def _template_allow_patterns(config: config_mod.RunConfig) -> list[str]:
-    ep = config.extract_params
+    ep = config.extract_template
     if ep is None:
         return []
 
@@ -42,13 +42,13 @@ def _template_allow_patterns(config: config_mod.RunConfig) -> list[str]:
     return allow_patterns
 
 
-def run_extract_params_stage(
+def run_extract_template_stage(
     config: config_mod.RunConfig,
     artifacts: Artifacts,
 ) -> int:
-    ep = config.extract_params
+    ep = config.extract_template
     if ep is None:
-        print("extract_params section missing from config.")
+        print("extract_template section missing from config.")
         return 1
 
     artifacts.mkdir_all()

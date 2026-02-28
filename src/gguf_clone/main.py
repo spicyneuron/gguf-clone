@@ -7,7 +7,7 @@ from . import config as config_mod
 from .artifacts import Artifacts
 from .common import OverwriteBehavior, set_overwrite_behavior, set_verbose
 from .resolve import check_deps, check_gguf_support
-from .stages import run_extract_params_stage, run_quantize_gguf_stage
+from .stages import run_extract_template_stage, run_quantize_gguf_stage
 
 
 def _init_run(
@@ -29,7 +29,7 @@ def _init_run(
     return None
 
 
-def run_extract_params(
+def run_extract_template(
     config: config_mod.RunConfig,
     artifacts: Artifacts,
     *,
@@ -40,7 +40,7 @@ def run_extract_params(
     if err:
         print(err)
         return 1
-    return run_extract_params_stage(config, artifacts)
+    return run_extract_template_stage(config, artifacts)
 
 
 def run_quantize_gguf(
@@ -94,7 +94,7 @@ def run_pipeline(
     artifacts = Artifacts.from_config(config.output_dir, config.template, config.target)
 
     stages: list[tuple[object, Callable[..., int]]] = [
-        (config.extract_params, run_extract_params),
+        (config.extract_template, run_extract_template),
         (config.quantize_gguf, run_quantize_gguf),
         (config.quantize_mlx, run_quantize_mlx),
     ]
@@ -114,7 +114,7 @@ def run_pipeline(
             return result
 
     if not ran_any:
-        print("No stages declared in config (extract_params, quantize_gguf, quantize_mlx).")
+        print("No stages declared in config (extract_template, quantize_gguf, quantize_mlx).")
         return 1
 
     return 0

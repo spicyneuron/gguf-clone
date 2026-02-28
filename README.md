@@ -69,7 +69,7 @@ The config format is versioned and only `version: 2` is supported.
 
 Stage sections are optional. `run` executes declared stages in order.
 
-- `extract_params`: build quantization parameter files from template GGUFs
+- `extract_template`: build quantization parameter files from template GGUFs
 - `quantize_gguf`: quantize target model using extracted params
 - `quantize_mlx`: reserved for MLX stage (not implemented yet)
 
@@ -82,7 +82,7 @@ source:
   template: unsloth/Qwen3-0.6B-GGUF
   target: Qwen/Qwen3-0.6B
 
-extract_params:
+extract_template:
   ggufs: "*UD-IQ1_M*.gguf"
 ```
 
@@ -97,7 +97,7 @@ source:
 
 output_dir: output
 
-extract_params:
+extract_template:
   ggufs:
     - "*UD-IQ1_M*.gguf"
     - "*UD-Q2_K_XL*.gguf"

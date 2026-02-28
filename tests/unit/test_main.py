@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from gguf_clone.artifacts import Artifacts
 from gguf_clone.config import RunConfig as V2RunConfig, SourceRef
-from gguf_clone.main import run_extract_params, run_pipeline, run_quantize_gguf
+from gguf_clone.main import run_extract_template, run_pipeline, run_quantize_gguf
 from gguf_clone.params import ParamsPayload, QuantParams, load_params
 from gguf_clone.resolve import ToolPaths
 
@@ -13,14 +13,14 @@ from gguf_clone.resolve import ToolPaths
 def _v2_config(
     tmp_path: Path,
     *,
-    extract_params: object = None,
+    extract_template: object = None,
     quantize_gguf: object = None,
 ) -> V2RunConfig:
-    from gguf_clone.config import ExtractParamsConfig, QuantizeGgufConfig
+    from gguf_clone.config import ExtractTemplateConfig, QuantizeGgufConfig
 
     ep = None
-    if extract_params is not None:
-        ep = ExtractParamsConfig.model_validate(extract_params)
+    if extract_template is not None:
+        ep = ExtractTemplateConfig.model_validate(extract_template)
     qg = None
     if quantize_gguf is not None:
         qg = QuantizeGgufConfig.model_validate(quantize_gguf)
@@ -28,7 +28,7 @@ def _v2_config(
         template=SourceRef(repo="org/template", path=None),
         target=SourceRef(repo="org/target", path=None),
         output_dir=tmp_path / "output",
-        extract_params=ep,
+        extract_template=ep,
         quantize_gguf=qg,
         quantize_mlx=None,
     )
@@ -50,10 +50,10 @@ def _tool_paths() -> ToolPaths:
     )
 
 
-def test_run_extract_params_writes_gguf_json(tmp_path: Path) -> None:
+def test_run_extract_template_writes_gguf_json(tmp_path: Path) -> None:
     config = _v2_config(
         tmp_path,
-        extract_params={"ggufs": ["*Q4_K*.gguf"], "targets": ["gguf"]},
+        extract_template={"ggufs": ["*Q4_K*.gguf"], "targets": ["gguf"]},
     )
     arts = _v2_artifacts(tmp_path)
 
@@ -70,19 +70,19 @@ def test_run_extract_params_writes_gguf_json(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.stages.extract_params.resolve_source_snapshot", return_value=template_snapshot),
-        patch("gguf_clone.stages.extract_params.build_params", return_value=fake_params),
+        patch("gguf_clone.stages.extract_template.resolve_source_snapshot", return_value=template_snapshot),
+        patch("gguf_clone.stages.extract_template.build_params", return_value=fake_params),
     ):
-        result = run_extract_params(config, arts, overwrite_behavior="overwrite")
+        result = run_extract_template(config, arts, overwrite_behavior="overwrite")
 
     assert result == 0
     assert arts.params_gguf("Q4_K").exists()
 
 
-def test_run_extract_params_stages_template_artifacts(tmp_path: Path) -> None:
+def test_run_extract_template_stages_template_artifacts(tmp_path: Path) -> None:
     config = _v2_config(
         tmp_path,
-        extract_params={"ggufs": ["*Q4_K*.gguf"], "targets": ["gguf"]},
+        extract_template={"ggufs": ["*Q4_K*.gguf"], "targets": ["gguf"]},
         quantize_gguf={
             "imatrix": "*imatrix*",
             "copy_metadata": ["tokenizer.chat_template"],
@@ -107,14 +107,14 @@ def test_run_extract_params_stages_template_artifacts(tmp_path: Path) -> None:
     with (
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
-        patch("gguf_clone.stages.extract_params.resolve_source_snapshot", return_value=template_snapshot),
-        patch("gguf_clone.stages.extract_params.build_params", return_value=fake_params),
+        patch("gguf_clone.stages.extract_template.resolve_source_snapshot", return_value=template_snapshot),
+        patch("gguf_clone.stages.extract_template.build_params", return_value=fake_params),
         patch(
-            "gguf_clone.stages.extract_params.extract_template_metadata",
+            "gguf_clone.stages.extract_template.extract_template_metadata",
             return_value={"tokenizer.chat_template": "{{ chat }}"},
         ),
     ):
-        result = run_extract_params(config, arts, overwrite_behavior="overwrite")
+        result = run_extract_template(config, arts, overwrite_behavior="overwrite")
 
     assert result == 0
     payload = load_params(arts.params_gguf("Q4_K"))
@@ -126,7 +126,7 @@ def test_run_extract_params_stages_template_artifacts(tmp_path: Path) -> None:
     assert (arts.template_files_dir / "mmproj.bin").exists()
 
 
-def test_run_extract_params_missing_section(tmp_path: Path) -> None:
+def test_run_extract_template_missing_section(tmp_path: Path) -> None:
     config = _v2_config(tmp_path)
     arts = _v2_artifacts(tmp_path)
 
@@ -134,7 +134,7 @@ def test_run_extract_params_missing_section(tmp_path: Path) -> None:
         patch("gguf_clone.main.check_deps", return_value=[]),
         patch("gguf_clone.main.check_gguf_support", return_value=None),
     ):
-        result = run_extract_params(config, arts)
+        result = run_extract_template(config, arts)
 
     assert result == 1
 
@@ -484,7 +484,7 @@ def test_run_pipeline_executes_stages_in_order(tmp_path: Path) -> None:
             "target": "org/target",
         },
         "output_dir": "output",
-        "extract_params": {
+        "extract_template": {
             "ggufs": ["*.gguf"],
         },
         "quantize_gguf": {
@@ -501,7 +501,7 @@ def test_run_pipeline_executes_stages_in_order(tmp_path: Path) -> None:
 
     def fake_extract(config: V2RunConfig, arts: Artifacts, **_kw: object) -> int:
         del config, arts
-        calls.append("extract_params")
+        calls.append("extract_template")
         return 0
 
     def fake_quantize(config: V2RunConfig, arts: Artifacts, **_kw: object) -> int:
@@ -510,13 +510,13 @@ def test_run_pipeline_executes_stages_in_order(tmp_path: Path) -> None:
         return 0
 
     with (
-        patch("gguf_clone.main.run_extract_params", side_effect=fake_extract),
+        patch("gguf_clone.main.run_extract_template", side_effect=fake_extract),
         patch("gguf_clone.main.run_quantize_gguf", side_effect=fake_quantize),
     ):
         result = run_pipeline(config_file)
 
     assert result == 0
-    assert calls == ["extract_params", "quantize_gguf"]
+    assert calls == ["extract_template", "quantize_gguf"]
 
 
 def test_run_pipeline_skips_absent_stages(tmp_path: Path) -> None:
@@ -528,7 +528,7 @@ def test_run_pipeline_skips_absent_stages(tmp_path: Path) -> None:
             "template": "org/template",
             "target": "org/target",
         },
-        "extract_params": {
+        "extract_template": {
             "ggufs": ["*.gguf"],
         },
     }
@@ -539,17 +539,17 @@ def test_run_pipeline_skips_absent_stages(tmp_path: Path) -> None:
 
     def fake_extract(config: V2RunConfig, arts: Artifacts, **_kw: object) -> int:
         del config, arts
-        calls.append("extract_params")
+        calls.append("extract_template")
         return 0
 
     with (
-        patch("gguf_clone.main.run_extract_params", side_effect=fake_extract),
+        patch("gguf_clone.main.run_extract_template", side_effect=fake_extract),
         patch("gguf_clone.main.run_quantize_gguf") as qg_mock,
     ):
         result = run_pipeline(config_file)
 
     assert result == 0
-    assert calls == ["extract_params"]
+    assert calls == ["extract_template"]
     qg_mock.assert_not_called()
 
 
@@ -579,7 +579,7 @@ def test_run_pipeline_stops_on_stage_failure(tmp_path: Path) -> None:
             "template": "org/template",
             "target": "org/target",
         },
-        "extract_params": {
+        "extract_template": {
             "ggufs": ["*.gguf"],
         },
         "quantize_gguf": {
@@ -595,7 +595,7 @@ def test_run_pipeline_stops_on_stage_failure(tmp_path: Path) -> None:
         return 1
 
     with (
-        patch("gguf_clone.main.run_extract_params", side_effect=fake_extract_fail),
+        patch("gguf_clone.main.run_extract_template", side_effect=fake_extract_fail),
         patch("gguf_clone.main.run_quantize_gguf") as qg_mock,
     ):
         result = run_pipeline(config_file)

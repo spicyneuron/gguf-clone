@@ -8,7 +8,7 @@ from typing import cast
 from . import config as config_mod
 from .artifacts import Artifacts
 from .common import OverwriteBehavior
-from .main import run_extract_params, run_pipeline, run_quantize_gguf, run_quantize_mlx
+from .main import run_extract_template, run_pipeline, run_quantize_gguf, run_quantize_mlx
 
 
 def _overwrite_from_args(args: argparse.Namespace) -> OverwriteBehavior | None:
@@ -40,16 +40,16 @@ def _dispatch_run(args: argparse.Namespace) -> int:
     )
 
 
-def _dispatch_extract_params(args: argparse.Namespace) -> int:
+def _dispatch_extract_template(args: argparse.Namespace) -> int:
     config_path = cast(Path, args.config).expanduser()
     loaded = _load_config_and_artifacts(config_path)
     if not loaded:
         return 1
     config, artifacts = loaded
-    if config.extract_params is None:
-        print("extract_params section missing from config.")
+    if config.extract_template is None:
+        print("extract_template section missing from config.")
         return 1
-    return run_extract_params(
+    return run_extract_template(
         config,
         artifacts,
         verbose=cast(bool, args.verbose),
@@ -120,7 +120,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-SUBCOMMANDS = ("run", "extract-params", "quantize-gguf", "quantize-mlx")
+SUBCOMMANDS = ("run", "extract-template", "quantize-gguf", "quantize-mlx")
 
 
 def _is_run_fallback(argv: list[str]) -> bool:
@@ -141,7 +141,7 @@ def main() -> None:
     _add_common_args(run_parser)
 
     ep_parser = subparsers.add_parser(
-        "extract-params", help="extract quantization parameters from template GGUFs"
+        "extract-template", help="extract quantization parameters from template GGUFs"
     )
     _add_common_args(ep_parser)
 
@@ -164,7 +164,7 @@ def main() -> None:
 
     dispatch = {
         "run": _dispatch_run,
-        "extract-params": _dispatch_extract_params,
+        "extract-template": _dispatch_extract_template,
         "quantize-gguf": _dispatch_quantize_gguf,
         "quantize-mlx": _dispatch_quantize_mlx,
     }
